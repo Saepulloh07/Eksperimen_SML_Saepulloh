@@ -25,8 +25,8 @@ jobs:
       - name: Install Dependencies
         run: pip install -r preprosessing/requirements.txt
 
-      - name: Run Preprocessing Script
-        run: python preprocessing/automation_Saepulloh.py
+      - name: Run Preprosessing Script
+        run: python preprosessing/automation_Saepulloh.py
 
       - name: Upload Processed Dataset as Artifact
         uses: actions/upload-artifact@v4
