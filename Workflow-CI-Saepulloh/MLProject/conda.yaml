@@ -1,0 +1,12 @@
+name: wine-env
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - mlflow>=2.19.0
+      - scikit-learn
+      - pandas
+      - numpy
+      - joblib

@@ -1,26 +1,25 @@
 name: Model Training Pipeline
 
 on:
-  workflow_run:
-    workflows: ["Wine Quality Preprocessing Pipeline"]
-    types: [completed]
-    branches: [main, develop]
   workflow_dispatch:
     inputs:
       model_type:
-        description: Model type to train
+        description: Choose model to train
         required: true
         type: choice
         options: [baseline, tuned]
         default: baseline
+  workflow_run:
+    workflows: ["Wine Quality Preprocessing Pipeline"]
+    types: [completed]
 
 jobs:
-  train:
+  train-model:
     name: Train ${{ inputs.model_type || 'baseline' }} Model
     runs-on: ubuntu-latest
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && contains('main develop', github.event.workflow_run.head_branch))
+      (github.event.workflow_run.conclusion == 'success')
 
     steps:
       - name: Checkout Repository
@@ -32,17 +31,17 @@ jobs:
           python-version: "3.10"
           cache: pip
 
-      - name: Install All Dependencies (including MLflow)
+      - name: Install Dependencies (including MLflow)
         run: |
           python -m pip install --upgrade pip
           pip install pandas numpy scikit-learn joblib matplotlib seaborn
-          pip install mlflow python-dotenv dagshub  # <-- Yang paling penting!
+          pip install mlflow python-dotenv dagshub
 
       - name: Download Preprocessed Data
         uses: actions/download-artifact@v4
         with:
           name: preprocessed-wine-data
-          path: Membangun_model/data/
+          path: Membangun_model/data/preprocessed/
 
       - name: Train Model
         working-directory: ./Membangun_model
@@ -51,15 +50,17 @@ jobs:
           DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
           DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
-          if [ "${{ inputs.model_type }}" = "tuned" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then
-            echo "Running baseline model (default)"
-            python modelling.py
-          else
-            echo "Running tuned model"
+          echo "Starting training..."
+          if [[ "${{ inputs.model_type }}" == "tuned" ]]; then
+            echo "Running hyperparameter tuning..."
             python modelling_tuning.py
+          else
+            echo "Running baseline model..."
+            python modelling.py
           fi
+          echo "Training completed!"
 
-      - name: Upload Model Artifact
+      - name: Upload Model Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.model_type || 'baseline' }}-model-artifacts
@@ -68,3 +69,15 @@ jobs:
             Membangun_model/best_model_tuned.pkl
             Membangun_model/artifacts/
           retention-days: 30
+
+      - name: Success Comment on PR
+        if: github.event.pull_request.number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `**Training Selesai!**\n\nModel: \`${{ inputs.model_type || 'baseline' }}\`\nArtifact: \`${{ inputs.model_type || 'baseline' }}-model-artifacts\``
+            })

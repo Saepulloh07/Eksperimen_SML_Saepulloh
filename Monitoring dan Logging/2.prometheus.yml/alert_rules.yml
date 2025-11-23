@@ -1,0 +1,118 @@
+groups:
+  - name: model_performance_alerts
+    interval: 30s
+    rules:
+      # Alert 1: High Error Rate
+      - alert: HighModelErrorRate
+        expr: rate(model_errors_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          component: model
+        annotations:
+          summary: "High error rate detected in model predictions"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+      # Alert 2: High Prediction Latency
+      - alert: HighPredictionLatency
+        expr: histogram_quantile(0.95, rate(model_prediction_duration_seconds_bucket[5m])) > 2.0
+        for: 3m
+        labels:
+          severity: warning
+          component: model
+        annotations:
+          summary: "High prediction latency detected"
+          description: "95th percentile latency is {{ $value }}s, exceeding 2s threshold"
+
+      # Alert 3: Model API Down
+      - alert: ModelAPIDown
+        expr: up{job="wine_model_api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Model API is down"
+          description: "Wine Quality Model API has been down for more than 1 minute"
+
+  - name: system_alerts
+    interval: 30s
+    rules:
+      # Alert 4: High CPU Usage
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value }}% on {{ $labels.instance }}"
+
+      # Alert 5: High Memory Usage
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value }}% on {{ $labels.instance }}"
+
+      # Alert 6: Disk Space Low
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Low disk space"
+          description: "Available disk space is {{ $value }}% on {{ $labels.instance }}"
+
+  - name: prediction_quality_alerts
+    interval: 1m
+    rules:
+      # Alert 7: Prediction Class Imbalance
+      - alert: PredictionClassImbalance
+        expr: |
+          (
+            sum(rate(model_predictions_total{prediction_class="1"}[10m]))
+            /
+            sum(rate(model_predictions_total[10m]))
+          ) > 0.9 or
+          (
+            sum(rate(model_predictions_total{prediction_class="1"}[10m]))
+            /
+            sum(rate(model_predictions_total[10m]))
+          ) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: model
+        annotations:
+          summary: "Prediction class imbalance detected"
+          description: "Class 1 ratio is {{ $value | humanizePercentage }} over last 10 minutes"
+
+      # Alert 8: Low Prediction Volume
+      - alert: LowPredictionVolume
+        expr: rate(model_predictions_total[5m]) < 0.1
+        for: 10m
+        labels:
+          severity: info
+          component: model
+        annotations:
+          summary: "Low prediction volume"
+          description: "Prediction rate is {{ $value }} requests/sec over last 5 minutes"
+
+      # Alert 9: High Prediction Volume Spike
+      - alert: PredictionVolumeSpike
+        expr: rate(model_predictions_total[1m]) > 100
+        for: 2m
+        labels:
+          severity: warning
+          component: model
+        annotations:
+          summary: "Unusual spike in prediction volume"
+          description: "Prediction rate is {{ $value }} requests/sec"
