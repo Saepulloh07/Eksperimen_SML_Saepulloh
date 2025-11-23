@@ -3,32 +3,24 @@ name: Model Training Pipeline
 on:
   workflow_run:
     workflows: ["Wine Quality Preprocessing Pipeline"]
-    types:
-      - completed
+    types: [completed]
     branches: [main, develop]
   workflow_dispatch:
     inputs:
       model_type:
-        description: "Choose training type"
+        description: Model type to train
         required: true
         type: choice
-        options:
-          - baseline
-          - tuned
+        options: [baseline, tuned]
         default: baseline
 
-env:
-  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-  DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
-  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-
 jobs:
-  train-baseline:
-    name: Train Baseline Model
+  train:
+    name: Train ${{ inputs.model_type || 'baseline' }} Model
     runs-on: ubuntu-latest
     if: >
-      github.event_name == 'workflow_dispatch' && 
-      (inputs.model_type == 'baseline' || inputs.model_type == '')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && contains('main develop', github.event.workflow_run.head_branch))
 
     steps:
       - name: Checkout Repository
@@ -40,127 +32,39 @@ jobs:
           python-version: "3.10"
           cache: pip
 
-      - name: Install Dependencies
+      - name: Install All Dependencies (including MLflow)
         run: |
           python -m pip install --upgrade pip
-          pip install -r Membangun_model/requirements.txt
+          pip install pandas numpy scikit-learn joblib matplotlib seaborn
+          pip install mlflow python-dotenv dagshub  # <-- Yang paling penting!
 
-      - name: Train Baseline Model
-        working-directory: ./Membangun_model
-        run: |
-          echo "Starting baseline model training..."
-          python modelling.py
-          echo "Baseline training completed."
-
-      - name: Upload Baseline Model Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: baseline-model-artifacts
-          path: |
-            Membangun_model/artifacts/
-            Membangun_model/wine_quality_model.pkl
-          retention-days: 30
-
-  train-tuned:
-    name: Train Tuned Model
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && inputs.model_type == 'tuned'
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-          cache: pip
-
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r Membangun_model/requirements.txt
-
-      - name: Train Tuned Model
-        working-directory: ./Membangun_model
-        run: |
-          echo "Starting hyperparameter tuning..."
-          python modelling_tuning.py
-          echo "Tuning completed."
-
-      - name: Upload Tuned Model Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: tuned-model-artifacts
-          path: |
-            Membangun_model/artifacts/
-            Membangun_model/best_model_tuned.pkl
-          retention-days: 30
-
-  docker-build-push:
-    name: Build and Push Docker Image
-    runs-on: ubuntu-latest
-    needs: train-baseline
-    # Hanya jalankan saat push ke main DAN preprocessing selesai (via workflow_run)
-    if: >
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main'
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Download Baseline Model Artifacts
+      - name: Download Preprocessed Data
         uses: actions/download-artifact@v4
         with:
-          name: baseline-model-artifacts
-          path: Membangun_model/
+          name: preprocessed-wine-data
+          path: Membangun_model/data/
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and Push Docker Image
+      - name: Train Model
+        working-directory: ./Membangun_model
+        env:
+          DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+          DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
-          cd Membangun_model
+          if [ "${{ inputs.model_type }}" = "tuned" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "Running baseline model (default)"
+            python modelling.py
+          else
+            echo "Running tuned model"
+            python modelling_tuning.py
+          fi
 
-          # Build and push latest
-          docker buildx build \
-            --push \
-            --platform linux/amd64,linux/arm64 \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/wine-quality-model:latest \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/wine-quality-model:${{ github.sha }} \
-            .
-
-      - name: Create GitHub Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - name: Upload Model Artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: ${{ inputs.model_type || 'baseline' }}-model-artifacts
+          path: |
             Membangun_model/wine_quality_model.pkl
-            Membangun_model/artifacts/*
-
-  summary-comment:
-    name: Post Summary Comment on PR
-    runs-on: ubuntu-latest
-    needs: [train-baseline, train-tuned]
-    if: github.event_name == 'workflow_dispatch' && github.event.pull_request.number != ''
-    steps:
-      - name: Comment on PR
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const type = "${{ inputs.model_type }}" || "baseline";
-            const artifact = type === "tuned" ? "tuned-model-artifacts" : "baseline-model-artifacts";
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `**Model Training Completed**\n\n- Type: \`${type}\`\n- Model artifacts available: \`${artifact}\`\n- Docker image: \`${{ secrets.DOCKERHUB_USERNAME }}/wine-quality-model:latest\``
-            })
+            Membangun_model/best_model_tuned.pkl
+            Membangun_model/artifacts/
+          retention-days: 30
