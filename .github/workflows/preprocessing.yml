@@ -1,36 +1,216 @@
-name: Automated Preprocessing Pipeline
+name: Wine Quality Preprocessing Pipeline
 
 on:
   push:
-    branches: ["main"]
+    branches: [ main, develop ]
+    paths:
+      - 'preprosessing/**'
+      - '.github/workflows/preprocessing-pipeline.yml'
   pull_request:
-    branches: ["main"]
-  workflow_dispatch:
-  schedule:
-    - cron: "0 0 * * *" # Run setiap hari jam 00:00 UTC
+    branches: [ main ]
+  workflow_dispatch:  # Manual trigger
+    inputs:
+      dataset_url:
+        description: 'Dataset URL'
+        required: false
+        default: 'https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv'
 
 jobs:
-  run-preprocessing:
+  preprocessing:
+    name: Data Preprocessing
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v3
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
-
-      - name: Install Dependencies
-        run: pip install -r preprosessing/requirements.txt
-
-      - name: Run Preprosessing Script
-        run: python preprosessing/automation_Saepulloh.py
-
-      - name: Upload Processed Dataset as Artifact
-        uses: actions/upload-artifact@v4
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: 📦 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy scikit-learn matplotlib seaborn joblib
+      
+      - name: 📊 Run Preprocessing Pipeline
+        working-directory: ./preprosessing
+        run: |
+          echo "🚀 Starting preprocessing pipeline..."
+          python automation_Saepulloh.py
+          echo "✅ Preprocessing completed!"
+      
+      - name: 🔍 Verify Output Files
+        working-directory: ./preprosessing/data/output
+        run: |
+          echo "📋 Checking generated files..."
+          ls -lh
+          
+          # Check if all required files exist
+          files=("X_train_scaled.npy" "X_test_scaled.npy" "y_train.npy" "y_test.npy" "scaler.pkl" "feature_names.pkl")
+          for file in "${files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✅ $file exists"
+            else
+              echo "❌ $file not found"
+              exit 1
+            fi
+          done
+      
+      - name: 📈 Generate Dataset Statistics
+        working-directory: ./preprosessing
+        run: |
+          python -c "
+          import numpy as np
+          import pickle
+          
+          print('\n📊 Dataset Statistics:')
+          print('=' * 50)
+          
+          X_train = np.load('data/output/X_train_scaled.npy')
+          X_test = np.load('data/output/X_test_scaled.npy')
+          y_train = np.load('data/output/y_train.npy')
+          y_test = np.load('data/output/y_test.npy')
+          
+          with open('data/output/feature_names.pkl', 'rb') as f:
+              features = pickle.load(f)
+          
+          print(f'✅ Training samples: {X_train.shape[0]}')
+          print(f'✅ Test samples: {X_test.shape[0]}')
+          print(f'✅ Features: {len(features)}')
+          print(f'✅ Train label distribution: {dict(zip(*np.unique(y_train, return_counts=True)))}')
+          print(f'✅ Test label distribution: {dict(zip(*np.unique(y_test, return_counts=True)))}')
+          print('=' * 50)
+          "
+      
+      - name: 📤 Upload Preprocessed Data as Artifact
+        uses: actions/upload-artifact@v3
         with:
-          name: processed-dataset
-          path: data/output/
+          name: preprocessed-wine-data
+          path: preprosessing/data/output/
           retention-days: 30
+      
+      - name: 📊 Create Summary Report
+        run: |
+          cat > $GITHUB_STEP_SUMMARY << 'EOF'
+          ## 🎉 Preprocessing Pipeline Summary
+          
+          ### ✅ Status: SUCCESS
+          
+          **Generated Files:**
+          - ✅ X_train_scaled.npy
+          - ✅ X_test_scaled.npy
+          - ✅ y_train.npy
+          - ✅ y_test.npy
+          - ✅ scaler.pkl
+          - ✅ feature_names.pkl
+          
+          **Next Steps:**
+          - Download artifacts for model training
+          - Run `modelling.py` or `modelling_tuning.py`
+          
+          **Artifact Download:**
+```bash
+          # Available in workflow artifacts
+```
+          EOF
+      
+      - name: 💬 Comment on PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Preprocessing pipeline completed successfully! Artifacts are ready for model training.'
+            })
+
+  data-validation:
+    name: Data Quality Checks
+    runs-on: ubuntu-latest
+    needs: preprocessing
+    
+    steps:
+      - name: 🔄 Checkout Repository
+        uses: actions/checkout@v3
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: 📥 Download Preprocessed Data
+        uses: actions/download-artifact@v3
+        with:
+          name: preprocessed-wine-data
+          path: ./artifacts/preprocessed/
+      
+      - name: 🔍 Validate Data Quality
+        run: |
+          python -c "
+          import numpy as np
+          import sys
+          
+          print('🔍 Running Data Quality Checks...')
+          print('=' * 50)
+          
+          # Load data
+          X_train = np.load('artifacts/preprocessed/X_train_scaled.npy')
+          X_test = np.load('artifacts/preprocessed/X_test_scaled.npy')
+          y_train = np.load('artifacts/preprocessed/y_train.npy')
+          y_test = np.load('artifacts/preprocessed/y_test.npy')
+          
+          errors = []
+          
+          # Check 1: No NaN values
+          if np.isnan(X_train).any() or np.isnan(X_test).any():
+              errors.append('❌ NaN values detected in features')
+          else:
+              print('✅ No NaN values in features')
+          
+          # Check 2: Proper scaling (mean ~0, std ~1)
+          train_mean = np.mean(X_train)
+          train_std = np.std(X_train)
+          if not (-0.1 < train_mean < 0.1 and 0.9 < train_std < 1.1):
+              errors.append(f'❌ Scaling issue: mean={train_mean:.4f}, std={train_std:.4f}')
+          else:
+              print(f'✅ Proper scaling: mean={train_mean:.4f}, std={train_std:.4f}')
+          
+          # Check 3: Binary labels (0 and 1)
+          unique_train = np.unique(y_train)
+          unique_test = np.unique(y_test)
+          if not (set(unique_train) == {0, 1} and set(unique_test) == {0, 1}):
+              errors.append('❌ Label values are not binary (0, 1)')
+          else:
+              print('✅ Binary labels confirmed (0, 1)')
+          
+          # Check 4: Reasonable train/test split (70-90% train)
+          total = len(y_train) + len(y_test)
+          train_ratio = len(y_train) / total
+          if not (0.7 <= train_ratio <= 0.9):
+              errors.append(f'❌ Unusual train/test split: {train_ratio:.2%}')
+          else:
+              print(f'✅ Train/test split: {train_ratio:.2%}/{1-train_ratio:.2%}')
+          
+          # Check 5: Class balance
+          train_pos_ratio = np.mean(y_train)
+          test_pos_ratio = np.mean(y_test)
+          if not (0.3 <= train_pos_ratio <= 0.7 and 0.3 <= test_pos_ratio <= 0.7):
+              print(f'⚠️  Class imbalance: Train={train_pos_ratio:.2%}, Test={test_pos_ratio:.2%}')
+          else:
+              print(f'✅ Balanced classes: Train={train_pos_ratio:.2%}, Test={test_pos_ratio:.2%}')
+          
+          print('=' * 50)
+          
+          if errors:
+              print('\n❌ Data Quality Issues:')
+              for error in errors:
+                  print(f'  {error}')
+              sys.exit(1)
+          else:
+              print('\n✅ All data quality checks passed!')
+          "
