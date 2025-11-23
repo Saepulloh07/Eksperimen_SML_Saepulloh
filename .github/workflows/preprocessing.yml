@@ -22,10 +22,10 @@ jobs:
 
     steps:
       - name: 🔄 Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
           cache: "pip"
@@ -85,7 +85,7 @@ jobs:
           "
 
       - name: 📤 Upload Preprocessed Data as Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: preprocessed-wine-data
           path: preprocessing/data/output/
@@ -115,7 +115,7 @@ jobs:
 
       - name: 💬 Comment on PR (if applicable)
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             github.rest.issues.createComment({
@@ -132,15 +132,15 @@ jobs:
 
     steps:
       - name: 🔄 Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
       - name: 📥 Download Preprocessed Data
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: preprocessed-wine-data
           path: ./artifacts/preprocessed/
@@ -190,7 +190,7 @@ jobs:
           train_pos_ratio = np.mean(y_train)
           test_pos_ratio = np.mean(y_test)
           if not (0.3 <= train_pos_ratio <= 0.7 and 0.3 <= test_pos_ratio <= 0.7):
-            print(f'⚠️  Class imbalance: Train={train_pos_ratio:.2%}, Test={test_pos_ratio:.2%}')
+            print(f'⚠️ Class imbalance: Train={train_pos_ratio:.2%}, Test={test_pos_ratio:.2%}')
           else:
             print(f'✅ Balanced classes: Train={train_pos_ratio:.2%}, Test={test_pos_ratio:.2%}')
 
