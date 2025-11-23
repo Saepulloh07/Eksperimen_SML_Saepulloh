@@ -1,0 +1,15 @@
+artifact_uri: file:///D:/Eksperiment_SML_Saepulloh/membangun_model/mlruns/264383139070815489/2c4da4d436554a1086b537cd565b2958/artifacts
+end_time: 1763874870153
+entry_point_name: ''
+experiment_id: '264383139070815489'
+lifecycle_stage: active
+run_id: 2c4da4d436554a1086b537cd565b2958
+run_name: config_rank_3
+run_uuid: 2c4da4d436554a1086b537cd565b2958
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763874870003
+status: 3
+tags: []
+user_id: saepu

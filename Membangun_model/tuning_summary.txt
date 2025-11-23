@@ -1,0 +1,22 @@
+HYPERPARAMETER TUNING RESULTS
+=============================
+Tuning Method: GridSearchCV
+CV folds: 5
+Total Configs: 216
+
+BEST PARAMETERS:
+- max_depth: None
+- max_features: sqrt
+- min_samples_leaf: 1
+- min_samples_split: 2
+- n_estimators: 200
+
+BEST MODEL PERFORMANCE:
+- Best CV Score: 0.7929
+- Test Accuracy: 0.8552
+- Precision: 0.8425
+- Recall: 0.8992
+- F1-Score: 0.8699
+- ROC-AUC: 0.9342148624155544
+- Matthews Corr: 0.7089
+- Cohen Kappa: 0.7070

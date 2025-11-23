@@ -1,0 +1,15 @@
+artifact_uri: file:///D:/Eksperiment_SML_Saepulloh/membangun_model/mlruns/264383139070815489/25c45c8546b5445b8b5f83cf31ee0fbf/artifacts
+end_time: 1763874885127
+entry_point_name: ''
+experiment_id: '264383139070815489'
+lifecycle_stage: active
+run_id: 25c45c8546b5445b8b5f83cf31ee0fbf
+run_name: hyperparameter_tuning_parent
+run_uuid: 25c45c8546b5445b8b5f83cf31ee0fbf
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763874612880
+status: 3
+tags: []
+user_id: saepu

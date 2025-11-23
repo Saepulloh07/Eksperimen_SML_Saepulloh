@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1763874884926
+current_stage: None
+description: null
+last_updated_timestamp: 1763874884926
+name: wine_quality_rf_tuned_model
+run_id: 25c45c8546b5445b8b5f83cf31ee0fbf
+run_link: null
+source: file:///D:/Eksperiment_SML_Saepulloh/membangun_model/mlruns/264383139070815489/25c45c8546b5445b8b5f83cf31ee0fbf/artifacts/best_model
+status: READY
+status_message: null
+storage_location: file:///D:/Eksperiment_SML_Saepulloh/membangun_model/mlruns/264383139070815489/25c45c8546b5445b8b5f83cf31ee0fbf/artifacts/best_model
+user_id: null
+version: 1
