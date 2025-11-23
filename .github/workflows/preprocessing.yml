@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - "preprosessing/**"
+      - "./preprosessing/**"
       - ".github/workflows/preprocessing-pipeline.yml"
   pull_request:
     branches: [main]
@@ -17,7 +17,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.10"
-  OUTPUT_DIR: preprosessing/data/output
+  OUTPUT_DIR: ./preprosessing/data/output
 
 jobs:
   preprocessing:
@@ -37,10 +37,10 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
-          pip install -r preprosessing/requirements.txt
+          pip install -r ./preprosessing/requirements.txt
 
       - name: Run Preprocessing Pipeline
-        working-directory: preprosessing
+        working-directory: ./preprosessing
         run: |
           echo "Starting preprocessing pipeline..."
           python automation_Saepulloh.py --dataset-url "${{ github.event.inputs.dataset_url }}"
@@ -70,7 +70,7 @@ jobs:
 
       - name: Generate Dataset Summary
         run: |
-          python preprosessing/scripts/generate_summary.py "$OUTPUT_DIR"
+          python ./preprosessing/scripts/generate_summary.py "$OUTPUT_DIR"
 
       - name: Upload Preprocessed Artifacts
         uses: actions/upload-artifact@v4
@@ -131,4 +131,4 @@ jobs:
 
       - name: Run Data Validation Checks
         run: |
-          python preprosessing/scripts/validate_data.py artifacts/preprocessed/
+          python ./preprosessing/scripts/validate_data.py artifacts/preprocessed/
