@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - "preprocessing/**"
+      - "preprosessing/**"
       - ".github/workflows/preprocessing-pipeline.yml"
   pull_request:
     branches: [main]
@@ -35,39 +35,47 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy scikit-learn matplotlib seaborn joblib
 
+      - name: Verify Preprocessing Folder Exists
+        run: |
+          echo "Current directory structure:"
+          ls -la
+          echo "Checking preprosessing folder..."
+          ls -la preprosessing/ || (echo "Folder preprosessing not found!" && exit 1)
+
       - name: Run Preprocessing Pipeline
-        working-directory: ./preprocessing
+        working-directory: ./preprosessing
         run: |
           echo "Starting preprocessing pipeline..."
           python automation_Saepulloh.py
           echo "Preprocessing completed."
 
       - name: Verify Output Files
-        working-directory: ./preprocessing/data/output
+        working-directory: ./preprosessing/data/output
         run: |
-          echo "Listing generated files..."
+          echo "Generated files:"
           ls -lh
 
-          files=("X_train_scaled.npy" "X_test_scaled.npy" "y_train.npy" "y_test.npy" "scaler.pkl" "feature_names.pkl")
-          for file in "${files[@]}"; do
-            if [ -f "$file" ]; then
-              echo "$file exists"
-            else
-              echo "$file not found"
-              exit 1
-            fi
+          required_files=(
+            "X_train_scaled.npy"
+            "X_test_scaled.npy"
+            "y_train.npy"
+            "y_test.npy"
+            "scaler.pkl"
+            "feature_names.pkl"
+          )
+          for file in "${required_files[@]}"; do
+            [ -f "$file" ] && echo "$file exists" || (echo "$file missing" && exit 1)
           done
 
       - name: Generate Dataset Statistics
-        working-directory: ./preprocessing
+        working-directory: ./preprosessing
         run: |
           python - <<'PY'
           import numpy as np
           import pickle
 
-          print("\nDataset Statistics:")
+          print("\nDataset Statistics")
           print("=" * 50)
-
           X_train = np.load('data/output/X_train_scaled.npy')
           X_test  = np.load('data/output/X_test_scaled.npy')
           y_train = np.load('data/output/y_train.npy')
@@ -76,29 +84,29 @@ jobs:
           with open('data/output/feature_names.pkl', 'rb') as f:
               features = pickle.load(f)
 
-          print(f"Training samples: {X_train.shape[0]}")
-          print(f"Test samples:     {X_test.shape[0]}")
-          print(f"Number of features: {len(features)}")
-          print(f"Train label distribution: {dict(zip(*np.unique(y_train, return_counts=True)))}")
-          print(f"Test label distribution:  {dict(zip(*np.unique(y_test, return_counts=True)))}")
+          print(f"Training samples   : {X_train.shape[0]}")
+          print(f"Test samples       : {X_test.shape[0]}")
+          print(f"Number of features : {len(features)}")
+          print(f"Train labels       : {dict(zip(*np.unique(y_train, return_counts=True)))}")
+          print(f"Test labels        : {dict(zip(*np.unique(y_test, return_counts=True)))}")
           print("=" * 50)
           PY
 
-      - name: Upload Preprocessed Data as Artifact
+      - name: Upload Preprocessed Data
         uses: actions/upload-artifact@v4
         with:
           name: preprocessed-wine-data
-          path: preprocessing/data/output/
+          path: preprosessing/data/output/
           retention-days: 30
 
       - name: Create Summary Report
         run: |
-          cat > $GITHUB_STEP_SUMMARY << 'EOF'
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
           ## Preprocessing Pipeline Summary
 
-          ### Status: SUCCESS
+          Status: SUCCESS
 
-          **Generated Files:**
+          Generated files:
           - X_train_scaled.npy
           - X_test_scaled.npy
           - y_train.npy
@@ -106,10 +114,7 @@ jobs:
           - scaler.pkl
           - feature_names.pkl
 
-          **Next Steps:**
-          - Download artifacts for model training
-          - Run `modelling.py` or `modelling_tuning.py`
-
+          Next: Download the artifact `preprocessed-wine-data` and continue with model training.
           EOF
 
       - name: Comment on Pull Request
@@ -121,7 +126,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: 'Preprocessing pipeline completed successfully. Preprocessed data artifacts are available for download.'
+              body: 'Preprocessing pipeline finished successfully!\nPreprocessed data is available as artifact `preprocessed-wine-data`.'
             })
 
   data-validation:
@@ -138,70 +143,48 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Download Preprocessed Data
+      - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
           name: preprocessed-wine-data
-          path: ./artifacts/preprocessed/
+          path: ./artifacts/
 
       - name: Validate Data Quality
         run: |
           python - <<'PY'
           import numpy as np
-          import sys
+          import sys, os
 
-          print("Running Data Quality Checks...")
-          print("=" * 50)
+          print("Data Quality Checks")
+          print("="*50)
 
-          X_train = np.load('artifacts/preprocessed/X_train_scaled.npy')
-          X_test  = np.load('artifacts/preprocessed/X_test_scaled.npy')
-          y_train = np.load('artifacts/preprocessed/y_train.npy')
-          y_test  = np.load('artifacts/preprocessed/y_test.npy')
+          X_train = np.load('artifacts/X_train_scaled.npy')
+          X_test  = np.load('artifacts/X_test_scaled.npy')
+          y_train = np.load('artifacts/y_train.npy')
+          y_test  = np.load('artifacts/y_test.npy')
 
           errors = []
 
-          # Check 1: No NaN values
           if np.isnan(X_train).any() or np.isnan(X_test).any():
-              errors.append("NaN values detected in features")
-          else:
-              print("No NaN values in features")
+              errors.append("NaN values found")
 
-          # Check 2: Proper scaling
-          train_mean = np.mean(X_train)
-          train_std  = np.std(X_train)
-          if not (-0.1 < train_mean < 0.1 and 0.9 < train_std < 1.1):
-              errors.append(f"Scaling issue: mean={train_mean:.4f}, std={train_std:.4f}")
-          else:
-              print(f"Proper scaling: mean={train_mean:.4f}, std={train_std:.4f}")
+          mean = X_train.mean()
+          std  = X_train.std()
+          if not (-0.1 < mean < 0.1 and 0.9 < std < 1.1):
+              errors.append(f"Scaling suspicious – mean={mean:.4f}, std={std:.4f}")
 
-          # Check 3: Binary labels
-          if not (set(np.unique(y_train)) == {0, 1} and set(np.unique(y_test)) == {0, 1}):
+          if set(np.unique(y_train)) != {0, 1} or set(np.unique(y_test)) != {0, 1}:
               errors.append("Labels are not binary (0/1)")
-          else:
-              print("Binary labels confirmed")
 
-          # Check 4: Train/test split ratio
-          total = len(y_train) + len(y_test)
-          train_ratio = len(y_train) / total
-          if not (0.7 <= train_ratio <= 0.9):
-              errors.append(f"Unusual train/test split: {train_ratio:.2%}")
-          else:
-              print(f"Train/test split: {train_ratio:.2%} / {(1-train_ratio):.2%}")
+          ratio = len(y_train) / (len(y_train) + len(y_test))
+          if not (0.7 <= ratio <= 0.9):
+              errors.append(f"Train/test split unusual: {ratio:.2%}")
 
-          # Check 5: Class balance (optional warning)
-          train_pos = np.mean(y_train)
-          test_pos  = np.mean(y_test)
-          if not (0.3 <= train_pos <= 0.7):
-              print(f"Warning: Class imbalance in train set ({train_pos:.2%} positive)")
-          if not (0.3 <= test_pos <= 0.7):
-              print(f"Warning: Class imbalance in test set ({test_pos:.2%} positive)")
-
-          print("=" * 50)
-
+          print("="*50)
           if errors:
-              print("\nData Quality Issues:")
-              for e in errors:
-                  print(f" - {e}")
+              print("Issues found:")
+              for e in errors: print(" -", e)
               sys.exit(1)
           else:
-              print("\nAll data quality checks passed.")
+              print("All quality checks passed")
+          PY
