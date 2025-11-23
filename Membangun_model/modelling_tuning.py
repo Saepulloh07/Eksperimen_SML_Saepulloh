@@ -31,7 +31,7 @@ def load_data():
     print("📥 LOADING PREPROCESSED DATA")
     print("=" * 70)
     
-    base_path = "../preprosessing/data/output"
+    base_path = "../preprocessing/data/output"
     
     files = {
         'X_train': 'X_train_scaled.npy',
@@ -456,7 +456,7 @@ def hyperparameter_tuning():
             print(f"   ✅ {os.path.basename(path)}")
         
         # Log scaler
-        mlflow.log_artifact('../preprosessing/data/output/scaler.pkl')
+        mlflow.log_artifact('../preprocessing/data/output/scaler.pkl')
         
         # Save and log best model
         print("\n💾 Saving best model...")
