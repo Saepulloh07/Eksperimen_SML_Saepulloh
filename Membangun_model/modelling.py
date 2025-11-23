@@ -3,7 +3,6 @@ import sys
 import pickle
 import mlflow
 import mlflow.sklearn
-from mlflow.tracking import MlflowClient
 import numpy as np
 import pandas as pd
 import joblib
@@ -12,7 +11,7 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
     f1_score, roc_auc_score, confusion_matrix,
     classification_report, matthews_corrcoef,
-    cohen_kappa_score
+    cohen_kappa_score, log_loss, balanced_accuracy_score
 )
 from sklearn.model_selection import cross_val_score
 import matplotlib.pyplot as plt
@@ -20,233 +19,257 @@ import seaborn as sns
 import warnings
 warnings.filterwarnings('ignore')
 
-# ============================================================
-# Utility
-# ============================================================
-def safe_load_npy(path):
-    if not os.path.exists(path):
-        print(f"[ERROR] File not found: {path}")
-        sys.exit(1)
-    return np.load(path)
-
-def safe_load_pickle(path):
-    if not os.path.exists(path):
-        print(f"[ERROR] File not found: {path}")
-        sys.exit(1)
-    with open(path, "rb") as f:
-        return pickle.load(f)
-
-def try_set_tracking_uri_dagshub(username, repo, token):
-    if not username or not repo:
-        raise ValueError("DAGSHUB_USERNAME or DAGSHUB_REPO not provided")
-
-    uri = f"https://dagshub.com/{username}/{repo}.mlflow"
-    mlflow.set_tracking_uri(uri)
-
-    client = MlflowClient()
-    _ = client.list_experiments()
-    return uri
+# Import config
+from mlflow_config import setup_mlflow, get_or_create_experiment
 
 
-# ============================================================
-# 1. MLflow Setup
-# ============================================================
-print("=" * 60)
-print("MLFLOW SETUP")
-print("=" * 60)
+def load_data():
+    """Load preprocessed data"""
+    print("=" * 70)
+    print("📥 LOADING PREPROCESSED DATA")
+    print("=" * 70)
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__))
 
-DAGSHUB_USERNAME = os.getenv("DAGSHUB_USERNAME")
-DAGSHUB_REPO = os.getenv("DAGSHUB_REPO")
-DAGSHUB_TOKEN = os.getenv("DAGSHUB_TOKEN")
+    base_path = os.path.join(script_dir, "..", "preprosessing", "data", "output")
+    base_path = os.path.normpath(base_path)
 
-if DAGSHUB_USERNAME and DAGSHUB_REPO:
-    try:
-        print("→ Attempting DagsHub connection...")
-        tracking_uri = try_set_tracking_uri_dagshub(DAGSHUB_USERNAME, DAGSHUB_REPO, DAGSHUB_TOKEN)
-        print(f"✓ Connected to DagsHub: {tracking_uri}")
-    except Exception as e:
-        print(f"[WARN] DagsHub failed: {e}")
-        print("→ Falling back to local MLflow")
-        mlflow.set_tracking_uri("file:./mlruns")
-else:
-    print("→ No DagsHub credentials. Using local MLflow ...")
-    mlflow.set_tracking_uri("file:./mlruns")
-
-tracking_uri = mlflow.get_tracking_uri()
-print(f"✓ MLflow tracking URI: {tracking_uri}")
-
-experiment_name = "wine_quality_classification"
-mlflow.set_experiment(experiment_name)
-print(f"✓ Experiment set: {experiment_name}")
-
-
-# ============================================================
-# 2. Load Preprocessed Data
-# ============================================================
-print("\n" + "=" * 60)
-print("LOADING PREPROCESSED DATA")
-print("=" * 60)
-
-base_preproc = os.path.join("..", "preprosessing", "data", "output")
-
-X_train = safe_load_npy(os.path.join(base_preproc, "X_train_scaled.npy"))
-X_test = safe_load_npy(os.path.join(base_preproc, "X_test_scaled.npy"))
-y_train = safe_load_npy(os.path.join(base_preproc, "y_train.npy"))
-y_test = safe_load_npy(os.path.join(base_preproc, "y_test.npy"))
-feature_names = safe_load_pickle(os.path.join(base_preproc, "feature_names.pkl"))
-scaler = joblib.load(os.path.join(base_preproc, "scaler.pkl"))
-
-print(f"✓ Training set: {X_train.shape}")
-print(f"✓ Test set:     {X_test.shape}")
-print(f"✓ Features:     {len(feature_names)}")
-
-# Save scaler locally for logging artifact
-local_scaler_path = "scaler.joblib"
-joblib.dump(scaler, local_scaler_path)
-print(f"✓ Local scaler saved: {local_scaler_path}")
+    files = {
+        'X_train': 'X_train_scaled.npy',
+        'X_test': 'X_test_scaled.npy',
+        'y_train': 'y_train.npy',
+        'y_test': 'y_test.npy',
+        'feature_names': 'feature_names.pkl',
+        'scaler': 'scaler.pkl'
+    }
+    
+    data = {}
+    for key, filename in files.items():
+        filepath = os.path.join(base_path, filename)
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"❌ File not found: {filepath}")
+        
+        if filename.endswith('.npy'):
+            data[key] = np.load(filepath)
+        elif filename.endswith('.pkl'):
+            with open(filepath, 'rb') as f:
+                data[key] = pickle.load(f)
+    
+    print(f"✅ Data loaded successfully from: {base_path}")
+    print(f"   - X_train: {data['X_train'].shape}")
+    print(f"   - X_test: {data['X_test'].shape}")
+    print(f"   - Features: {len(data['feature_names'])}")
+    
+    return data
 
 
-# ============================================================
-# 3. MLflow Training
-# ============================================================
-print("\n" + "=" * 60)
-print("MODEL TRAINING")
-print("=" * 60)
-
-params = {
-    "n_estimators": 100,
-    "max_depth": 10,
-    "min_samples_split": 5,
-    "min_samples_leaf": 2,
-    "random_state": 42,
-    "n_jobs": -1
-}
-
-with mlflow.start_run(run_name="random_forest_baseline") as run:
-    print(f"\nRUN ID: {run.info.run_id}")
-
-    # --------------------------
-    # Logging Params
-    # --------------------------
-    for k, v in params.items():
-        mlflow.log_param(k, v)
-
-    mlflow.log_param("train_samples", int(X_train.shape[0]))
-    mlflow.log_param("test_samples", int(X_test.shape[0]))
-    mlflow.log_param("n_features", int(X_train.shape[1]))
-
-    # --------------------------
-    # Train Model
-    # --------------------------
-    print("\nTraining model ...")
-    model = RandomForestClassifier(**params)
-    model.fit(X_train, y_train)
-    print("✓ Model trained")
-
-    # --------------------------
+def calculate_metrics(model, X_train, X_test, y_train, y_test):
+    """
+    Calculate comprehensive metrics
+    """
+    print("\n📊 Calculating metrics...")
+    
     # Predictions
-    # --------------------------
     y_train_pred = model.predict(X_train)
     y_test_pred = model.predict(X_test)
-
-    # probability if available
-    y_test_proba = None
-    if hasattr(model, "predict_proba"):
-        y_test_proba = model.predict_proba(X_test)[:, 1]
-
-    # --------------------------
-    # Metrics
-    # --------------------------
-    train_acc = accuracy_score(y_train, y_train_pred)
-    test_acc = accuracy_score(y_test, y_test_pred)
-
-    precision = precision_score(y_test, y_test_pred, average="binary")
-    recall = recall_score(y_test, y_test_pred, average="binary")
-    f1 = f1_score(y_test, y_test_pred, average="binary")
-
-    roc_auc = None
-    if y_test_proba is not None:
-        roc_auc = roc_auc_score(y_test, y_test_proba)
-
-    mcc = matthews_corrcoef(y_test, y_test_pred)
-    kappa = cohen_kappa_score(y_test, y_test_pred)
-
-    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
-    cv_mean, cv_std = cv_scores.mean(), cv_scores.std()
-
-    cm = confusion_matrix(y_test, y_test_pred)
-
-    specificity = None
-    if cm.shape == (2, 2):
-        tn, fp, fn, tp = cm.ravel()
-        specificity = tn / (tn + fp)
-
+    y_test_proba = model.predict_proba(X_test)[:, 1]
+    
+    # Basic metrics
     metrics = {
-        "train_accuracy": train_acc,
-        "test_accuracy": test_acc,
-        "precision": precision,
-        "recall": recall,
-        "f1_score": f1,
-        "roc_auc": roc_auc if roc_auc is not None else -1,
-        "mcc": mcc,
-        "kappa": kappa,
-        "cv_mean_acc": cv_mean,
-        "cv_std_acc": cv_std,
-        "specificity": specificity if specificity is not None else -1,
-        "overfitting": train_acc - test_acc
+        # Accuracy metrics
+        'train_accuracy': accuracy_score(y_train, y_train_pred),
+        'test_accuracy': accuracy_score(y_test, y_test_pred),
+        'balanced_accuracy': balanced_accuracy_score(y_test, y_test_pred),
+        
+        # Classification metrics
+        'precision': precision_score(y_test, y_test_pred),
+        'recall': recall_score(y_test, y_test_pred),
+        'f1_score': f1_score(y_test, y_test_pred),
+        
+        # ROC & Probability metrics
+        'roc_auc': roc_auc_score(y_test, y_test_proba),
+        'log_loss': log_loss(y_test, y_test_proba),
+        
+        # Statistical metrics
+        'matthews_corrcoef': matthews_corrcoef(y_test, y_test_pred),
+        'cohen_kappa': cohen_kappa_score(y_test, y_test_pred),
+        
+        # Overfitting indicator
+        'overfitting_gap': accuracy_score(y_train, y_train_pred) - accuracy_score(y_test, y_test_pred)
     }
+    
+    # Cross-validation
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5, scoring='accuracy')
+    metrics['cv_mean'] = cv_scores.mean()
+    metrics['cv_std'] = cv_scores.std()
+    
+    # Confusion matrix specificity
+    cm = confusion_matrix(y_test, y_test_pred)
+    tn, fp, fn, tp = cm.ravel()
+    metrics['specificity'] = tn / (tn + fp)
+    metrics['sensitivity'] = tp / (tp + fn)  # same as recall
+    
+    # False positive/negative rates
+    metrics['false_positive_rate'] = fp / (fp + tn)
+    metrics['false_negative_rate'] = fn / (fn + tp)
+    
+    print("✅ Metrics calculated:")
+    for name, value in metrics.items():
+        print(f"   - {name}: {value:.4f}")
+    
+    return metrics, y_test_pred, y_test_proba
 
-    for name, val in metrics.items():
-        mlflow.log_metric(name, float(val))
 
-    # ============================================================
-    # Artifacts
-    # ============================================================
+def create_visualizations(model, X_test, y_test, y_pred, feature_names):
+    """
+    Create and save visualizations
+    """
+    print("\n🎨 Creating visualizations...")
+    
     os.makedirs("artifacts", exist_ok=True)
-
-    # Confusion Matrix
-    plt.figure(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt="d")
-    plt.title("Confusion Matrix")
-    cm_path = "artifacts/confusion_matrix.png"
-    plt.savefig(cm_path)
-    plt.close()
-    mlflow.log_artifact(cm_path)
-
-    # Feature Importance
-    fi = pd.DataFrame({
-        "feature": feature_names,
-        "importance": model.feature_importances_
-    }).sort_values("importance", ascending=False)
-
+    
+    # 1. Confusion Matrix
     plt.figure(figsize=(8, 6))
-    sns.barplot(data=fi.head(10), x="importance", y="feature")
-    fi_path = "artifacts/feature_importance.png"
-    plt.savefig(fi_path)
+    cm = confusion_matrix(y_test, y_pred)
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=['Bad Wine', 'Good Wine'],
+                yticklabels=['Bad Wine', 'Good Wine'])
+    plt.title('Confusion Matrix', fontsize=14, fontweight='bold')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.tight_layout()
+    plt.savefig('artifacts/confusion_matrix.png', dpi=300)
     plt.close()
-    mlflow.log_artifact(fi_path)
-
-    # Report
-    report = classification_report(y_test, y_test_pred)
-    report_path = "artifacts/classification_report.txt"
-    with open(report_path, "w") as f:
+    
+    # 2. Feature Importance
+    fi_df = pd.DataFrame({
+        'feature': feature_names,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
+    
+    plt.figure(figsize=(10, 8))
+    sns.barplot(data=fi_df.head(10), x='importance', y='feature', palette='viridis')
+    plt.title('Top 10 Feature Importance', fontsize=14, fontweight='bold')
+    plt.xlabel('Importance Score')
+    plt.tight_layout()
+    plt.savefig('artifacts/feature_importance.png', dpi=300)
+    plt.close()
+    
+    # 3. Classification Report
+    report = classification_report(y_test, y_pred, 
+                                   target_names=['Bad Wine', 'Good Wine'])
+    with open('artifacts/classification_report.txt', 'w') as f:
         f.write(report)
-    mlflow.log_artifact(report_path)
+    
+    print("✅ Visualizations saved to artifacts/")
+    
+    return ['artifacts/confusion_matrix.png', 
+            'artifacts/feature_importance.png',
+            'artifacts/classification_report.txt']
 
-    # Save scaler
-    mlflow.log_artifact(local_scaler_path)
 
-    # ============================================================
-    # Log Model
-    # ============================================================
-    mlflow.sklearn.log_model(
-        sk_model=model,
-        artifact_path="model",
-    )
+def train_model():
+    """
+    Main training function with MLflow tracking
+    """
+    # Setup MLflow
+    print("=" * 70)
+    print("🚀 WINE QUALITY MODEL TRAINING")
+    print("=" * 70)
+    
+    setup_mlflow()
+    get_or_create_experiment("wine_quality_classification")
+    
+    # Load data
+    data = load_data()
+    X_train = data['X_train']
+    X_test = data['X_test']
+    y_train = data['y_train']
+    y_test = data['y_test']
+    feature_names = data['feature_names']
+    
+    # Model parameters
+    params = {
+        'n_estimators': 100,
+        'max_depth': 10,
+        'min_samples_split': 5,
+        'min_samples_leaf': 2,
+        'max_features': 'sqrt',
+        'random_state': 42,
+        'n_jobs': -1
+    }
+    
+    # Start MLflow run
+    with mlflow.start_run(run_name="random_forest_baseline") as run:
+        print(f"\n📌 Run ID: {run.info.run_id}")
+        print(f"📌 Run Name: {run.info.run_name}")
+        
+        # Log parameters
+        print("\n📝 Logging parameters...")
+        for key, value in params.items():
+            mlflow.log_param(key, value)
+        
+        # Additional metadata
+        mlflow.log_param("train_samples", X_train.shape[0])
+        mlflow.log_param("test_samples", X_test.shape[0])
+        mlflow.log_param("n_features", X_train.shape[1])
+        mlflow.log_param("model_type", "RandomForest")
+        
+        # Train model
+        print("\n🏋️  Training model...")
+        model = RandomForestClassifier(**params)
+        model.fit(X_train, y_train)
+        print("✅ Model trained successfully")
+        
+        # Calculate metrics
+        metrics, y_pred, y_proba = calculate_metrics(
+            model, X_train, X_test, y_train, y_test
+        )
+        
+        # Log metrics
+        print("\n📊 Logging metrics...")
+        for name, value in metrics.items():
+            mlflow.log_metric(name, float(value))
+        
+        # Create visualizations
+        artifact_paths = create_visualizations(
+            model, X_test, y_test, y_pred, feature_names
+        )
+        
+        # Log artifacts
+        print("\n📦 Logging artifacts...")
+        for path in artifact_paths:
+            mlflow.log_artifact(path)
+        
+        # Log model
+        print("\n💾 Logging model...")
+        mlflow.sklearn.log_model(
+            sk_model=model,
+            artifact_path="model",
+            registered_model_name="wine_quality_rf_model"
+        )
+        
+        # Save model locally
+        joblib.dump(model, 'wine_quality_model.pkl')
+        mlflow.log_artifact('wine_quality_model.pkl')
+        
+        # Log scaler
+        mlflow.log_artifact('../preprosessing/data/output/scaler.pkl')
+        
+        # Set tags
+        mlflow.set_tag("developer", "Saepulloh")
+        mlflow.set_tag("algorithm", "RandomForest")
+        mlflow.set_tag("dataset", "Wine Quality")
+        
+        print("\n" + "=" * 70)
+        print("✅ TRAINING COMPLETED SUCCESSFULLY!")
+        print("=" * 70)
+        print(f"\n📊 Test Accuracy: {metrics['test_accuracy']:.4f}")
+        print(f"📊 F1-Score: {metrics['f1_score']:.4f}")
+        print(f"📊 ROC-AUC: {metrics['roc_auc']:.4f}")
+        print(f"\n🌐 View results: {mlflow.get_tracking_uri()}")
+        print(f"🔑 Run ID: {run.info.run_id}")
 
-    # Tags
-    mlflow.set_tag("model_type", "RandomForest")
-    mlflow.set_tag("task", "classification")
-    mlflow.set_tag("dataset", "wine_quality")
 
-print("\nAll done! 🚀")
+if __name__ == "__main__":
+    train_model()
