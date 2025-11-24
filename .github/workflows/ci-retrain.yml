@@ -91,7 +91,7 @@ jobs:
 
           echo "✅ Training completed successfully"
 
-      - name: Get Latest Parent Run ID (Deployment Run)
+      - name: Get Latest Run ID and Best Model Info
         id: get_run_id
         run: |
           cd ${{ env.WORKING_DIR }}
@@ -101,29 +101,41 @@ jobs:
           from mlflow.tracking import MlflowClient
           import os
 
+          mlflow.set_tracking_uri("file:./mlruns")
           client = MlflowClient()
 
-          exp = client.get_experiment_by_name("Heart_Disease_Classification")
+          exp_name = "Heart_Disease_Classification"
+          exp = client.get_experiment_by_name(exp_name)
           if not exp:
-              print("ERROR: Experiment tidak ditemukan!")
+              print(f"ERROR: Experiment '{exp_name}' tidak ditemukan!")
               exit(1)
 
-          # Cari run dengan nama "Best_Model_Deployment" terbaru
-          runs = client.search_runs(
+          # CARA YANG BENAR & PASTI JALAN di FileStore (mlruns folder)
+          # Ambil semua run, lalu filter manual yang TIDAK punya tag parentRunId
+          all_runs = client.search_runs(
               experiment_ids=[exp.experiment_id],
-              filter_string='tags.mlflow.runName = "Best_Model_Deployment"',
               order_by=["start_time DESC"],
-              max_results=1
+              max_results=50
           )
 
-          if not runs:
-              print("ERROR: Tidak ada run 'Best_Model_Deployment'!")
+          parent_runs = [
+              r for r in all_runs
+              if "mlflow.parentRunId" not in r.data.tags
+          ]
+
+          if not parent_runs:
+              print("ERROR: Tidak ada parent run ditemukan!")
+              print("Daftar run terbaru:")
+              for r in all_runs[:10]:
+                  parent = r.data.tags.get("mlflow.parentRunId", "TIDAK ADA → INI PARENT")
+                  print(f"  → {r.info.run_id} | parentRunId: {parent}")
               exit(1)
 
-          run = runs[0]
-          run_id = run.info.run_id
-          best_model = run.data.params.get("best_model_name", "Unknown")
+          latest_parent = parent_runs[0]
+          run_id = latest_parent.info.run_id
+          best_model = latest_parent.data.params.get("best_model_name", "Unknown")
 
+          # Simpan ke GITHUB_ENV dan GITHUB_OUTPUT
           with open(os.environ["GITHUB_ENV"], "a") as f:
               f.write(f"LATEST_RUN_ID={run_id}\n")
               f.write(f"BEST_MODEL_NAME={best_model}\n")
@@ -132,22 +144,9 @@ jobs:
               f.write(f"run_id={run_id}\n")
               f.write(f"best_model_name={best_model}\n")
 
-          print(f"Latest Deployment Run ID: {run_id}")
+          print(f"Latest Parent Run ID: {run_id}")
           print(f"Best Model: {best_model}")
           PY
-
-      - name: Build Docker Image with MLflow (FIXED)
-        run: |
-          cd ${{ env.WORKING_DIR }}
-
-          echo "Building Docker image dari run: ${{ env.LATEST_RUN_ID }}"
-
-          mlflow models build-docker \
-            --model-uri "runs:/${{ env.LATEST_RUN_ID }}/best_model" \
-            --name "${{ secrets.DOCKER_USERNAME }}/heart-disease-model" \
-            --enable-mlserver
-
-          echo "Docker image berhasil dibuat!"
 
       - name: Verify Model Artifact and Structure
         run: |
