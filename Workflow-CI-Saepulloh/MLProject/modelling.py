@@ -98,7 +98,7 @@ for model_name, model in models.items():
                            log_model_signatures=True,
                            log_models=True)
     
-    with mlflow.start_run(run_name=model_name):
+    with mlflow.start_run(run_name=model_name, nested=True):
         # Training model
         print("⏳ Training model...")
         model.fit(X_train, y_train)
