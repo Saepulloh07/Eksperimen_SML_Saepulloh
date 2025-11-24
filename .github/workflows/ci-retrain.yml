@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 env:
-  PYTHON_VERSION: "3.12.7"
-  CONDA_ENV_NAME: "heart-disease-env"
+  PYTHON_VERSION: "3.12"
+  WORKING_DIR: "Workflow-CI-Saepulloh/MLProject"
 
 jobs:
   retrain-and-build-docker:
@@ -21,51 +21,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          auto-update-conda: true
           python-version: ${{ env.PYTHON_VERSION }}
-          miniconda-version: "latest"
-          activate-environment: ${{ env.CONDA_ENV_NAME }}
 
-      - name: Verify Conda Installation
-        shell: bash -l {0}
-        run: |
-          conda --version
-          conda info
-          which python
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/conda.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-      - name: Create Conda Environment
-        shell: bash -l {0}
+      - name: Install dependencies
         run: |
-          cd Workflow-CI-Saepulloh/MLProject
-          conda env create -f conda.yaml --force
-          conda env list
+          python -m pip install --upgrade pip
+          pip install pandas numpy scikit-learn mlflow matplotlib seaborn python-dotenv dagshub
 
-      - name: Install Additional Dependencies
-        shell: bash -l {0}
+      - name: Verify Installation
         run: |
-          conda activate ${{ env.CONDA_ENV_NAME }}
-          pip install --no-cache-dir jq
-
-      - name: Verify Environment
-        shell: bash -l {0}
-        run: |
-          conda activate ${{ env.CONDA_ENV_NAME }}
           python --version
-          pip list
+          pip list | grep -E "mlflow|pandas|scikit-learn"
           which mlflow
 
       - name: Setup DagsHub Credentials
-        shell: bash -l {0}
         env:
           DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
           DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
           DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
-          conda activate ${{ env.CONDA_ENV_NAME }}
-
           # Configure DagsHub if credentials available
           if [ -n "$DAGSHUB_TOKEN" ] && [ -n "$DAGSHUB_USERNAME" ] && [ -n "$DAGSHUB_REPO" ]; then
             echo "Configuring DagsHub tracking..."
@@ -75,98 +60,111 @@ jobs:
             echo "MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}" >> $GITHUB_ENV
             echo "MLFLOW_TRACKING_USERNAME=${MLFLOW_TRACKING_USERNAME}" >> $GITHUB_ENV
             echo "MLFLOW_TRACKING_PASSWORD=${MLFLOW_TRACKING_PASSWORD}" >> $GITHUB_ENV
+            echo "✓ DagsHub configured"
           else
             echo "Using local MLflow tracking"
           fi
 
       - name: Check Data Files
-        shell: bash -l {0}
         run: |
-          cd Workflow-CI-Saepulloh/MLProject
+          cd ${{ env.WORKING_DIR }}
 
           if [ ! -f "data/preprocessing_objects.pkl" ]; then
             echo "ERROR: preprocessing_objects.pkl not found!"
             echo "Available files in data/:"
-            ls -la data/ || echo "data/ directory not found"
+            ls -la data/ 2>/dev/null || echo "data/ directory not found"
             exit 1
           fi
 
           echo "✓ Data files verified"
+          ls -lh data/preprocessing_objects.pkl
 
-      - name: Run MLflow Project (Retraining)
-        shell: bash -l {0}
+      - name: Run Model Training
         run: |
-          conda activate ${{ env.CONDA_ENV_NAME }}
-          cd Workflow-CI-Saepulloh/MLProject
+          cd ${{ env.WORKING_DIR }}
 
           echo "Starting model training..."
           echo "Working directory: $(pwd)"
 
-          # Run MLflow project
-          mlflow run . \
-            --env-manager=conda \
-            --experiment-name=Heart_Disease_Classification
+          # Run training directly with Python
+          python modelling.py --model_name all
 
           echo "✓ Training completed successfully"
 
       - name: Get Latest Run ID
-        shell: bash -l {0}
+        id: get_run_id
         run: |
-          conda activate ${{ env.CONDA_ENV_NAME }}
-          cd Workflow-CI-Saepulloh/MLProject
+          cd ${{ env.WORKING_DIR }}
 
           # Get latest run ID from MLflow
-          LATEST_RUN_ID=$(mlflow runs list \
-            --experiment-name=Heart_Disease_Classification \
-            --max-results=1 \
-            --output-format=json \
-            | python -c "import sys, json; data = json.load(sys.stdin); print(data[0]['info']['run_id'] if data else '')")
+          LATEST_RUN_ID=$(python -c "
+          import mlflow
+          import os
 
-          if [ -z "$LATEST_RUN_ID" ]; then
+          mlflow.set_tracking_uri('file:./mlruns')
+          client = mlflow.tracking.MlflowClient()
+
+          # Get experiment
+          experiment = client.get_experiment_by_name('Heart_Disease_Classification')
+          if experiment is None:
+              print('ERROR: Experiment not found')
+              exit(1)
+
+          # Get latest run
+          runs = client.search_runs(
+              experiment_ids=[experiment.experiment_id],
+              order_by=['start_time DESC'],
+              max_results=1
+          )
+
+          if runs:
+              print(runs[0].info.run_id)
+          else:
+              print('ERROR: No runs found')
+              exit(1)
+          ")
+
+          if [ -z "$LATEST_RUN_ID" ] || [ "$LATEST_RUN_ID" = "ERROR:"* ]; then
             echo "ERROR: Could not retrieve run ID"
-            mlflow experiments list
             exit 1
           fi
 
           echo "LATEST_RUN_ID=$LATEST_RUN_ID" >> $GITHUB_ENV
+          echo "run_id=$LATEST_RUN_ID" >> $GITHUB_OUTPUT
           echo "✓ Latest Run ID: $LATEST_RUN_ID"
 
       - name: Verify Model Artifact
-        shell: bash -l {0}
         run: |
-          conda activate ${{ env.CONDA_ENV_NAME }}
-          cd Workflow-CI-Saepulloh/MLProject
+          cd ${{ env.WORKING_DIR }}
 
-          # Check if model artifact exists
-          MODEL_URI="runs:/${{ env.LATEST_RUN_ID }}/best_model"
+          echo "Checking artifacts for run: ${{ env.LATEST_RUN_ID }}"
 
-          echo "Checking model at: $MODEL_URI"
-
-          # List artifacts for the run
           python -c "
           import mlflow
+
+          mlflow.set_tracking_uri('file:./mlruns')
           client = mlflow.tracking.MlflowClient()
-          artifacts = client.list_artifacts('${{ env.LATEST_RUN_ID }}')
-          print('Available artifacts:')
-          for artifact in artifacts:
-              print(f'  - {artifact.path}')
+
+          try:
+              artifacts = client.list_artifacts('${{ env.LATEST_RUN_ID }}')
+              print('Available artifacts:')
+              for artifact in artifacts:
+                  print(f'  ✓ {artifact.path}')
+              
+              # Check if best_model exists
+              has_best_model = any('best_model' in a.path for a in artifacts)
+              if not has_best_model:
+                  print('WARNING: best_model artifact not found!')
+                  exit(1)
+              
+              print('\n✓ Model artifacts verified')
+          except Exception as e:
+              print(f'ERROR: {e}')
+              exit(1)
           "
 
-      - name: Build Docker Image
-        shell: bash -l {0}
-        run: |
-          conda activate ${{ env.CONDA_ENV_NAME }}
-          cd Workflow-CI-Saepulloh/MLProject
-
-          echo "Building Docker image..."
-
-          mlflow models build-docker \
-            --model-uri "runs:/${{ env.LATEST_RUN_ID }}/best_model" \
-            --name "${{ secrets.DOCKER_USERNAME }}/heart-disease-model" \
-            --enable-mlserver
-
-          echo "IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/heart-disease-model:latest" >> $GITHUB_ENV
-          echo "✓ Docker image built successfully"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -174,27 +172,69 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      - name: Build Docker Image with MLflow
+        run: |
+          cd ${{ env.WORKING_DIR }}
+
+          echo "Building Docker image from MLflow model..."
+
+          mlflow models build-docker \
+            --model-uri "runs:/${{ env.LATEST_RUN_ID }}/best_model" \
+            --name "${{ secrets.DOCKER_USERNAME }}/heart-disease-model" \
+            --enable-mlserver
+
+          echo "✓ Docker image built successfully"
+
       - name: Tag and Push Docker Images
         run: |
           IMAGE_BASE="${{ secrets.DOCKER_USERNAME }}/heart-disease-model"
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          RUN_ID="${{ env.LATEST_RUN_ID }}"
 
-          # Tag images
+          echo "Tagging and pushing images..."
+
+          # Tag with multiple versions
           docker tag "${IMAGE_BASE}:latest" "${IMAGE_BASE}:latest"
           docker tag "${IMAGE_BASE}:latest" "${IMAGE_BASE}:v${TIMESTAMP}"
-          docker tag "${IMAGE_BASE}:latest" "${IMAGE_BASE}:run-${{ env.LATEST_RUN_ID }}"
+          docker tag "${IMAGE_BASE}:latest" "${IMAGE_BASE}:${RUN_ID}"
 
           # Push all tags
           docker push "${IMAGE_BASE}:latest"
           docker push "${IMAGE_BASE}:v${TIMESTAMP}"
-          docker push "${IMAGE_BASE}:run-${{ env.LATEST_RUN_ID }}"
+          docker push "${IMAGE_BASE}:${RUN_ID}"
+
+          # Save image info
+          echo "IMAGE_LATEST=${IMAGE_BASE}:latest" >> $GITHUB_ENV
+          echo "IMAGE_VERSIONED=${IMAGE_BASE}:v${TIMESTAMP}" >> $GITHUB_ENV
+          echo "IMAGE_RUN=${IMAGE_BASE}:${RUN_ID}" >> $GITHUB_ENV
 
           echo "✓ Docker images pushed successfully"
-          echo "  - ${IMAGE_BASE}:latest"
-          echo "  - ${IMAGE_BASE}:v${TIMESTAMP}"
-          echo "  - ${IMAGE_BASE}:run-${{ env.LATEST_RUN_ID }}"
 
-      - name: Summary
+      - name: Create Summary
+        run: |
+          echo "## 🎉 CI/CD Pipeline Completed Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Training Results" >> $GITHUB_STEP_SUMMARY
+          echo "- MLflow Run ID: \`${{ env.LATEST_RUN_ID }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Experiment: Heart_Disease_Classification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐳 Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "The following images have been pushed to Docker Hub:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.IMAGE_LATEST }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.IMAGE_VERSIONED }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.IMAGE_RUN }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Quick Start" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.IMAGE_LATEST }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker run -p 5000:8080 ${{ env.IMAGE_LATEST }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [Docker Hub Repository](https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/heart-disease-model)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Final Summary
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║          CI/CD PIPELINE COMPLETED SUCCESSFULLY!            ║"
@@ -204,7 +244,9 @@ jobs:
           echo "✓ MLflow Run ID: ${{ env.LATEST_RUN_ID }}"
           echo "✓ Docker images built and pushed"
           echo ""
-          echo "Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/heart-disease-model"
+          echo "📦 Docker Images:"
+          echo "  - ${{ env.IMAGE_LATEST }}"
+          echo "  - ${{ env.IMAGE_VERSIONED }}"
+          echo "  - ${{ env.IMAGE_RUN }}"
           echo ""
-          echo "To pull the image:"
-          echo "  docker pull ${{ secrets.DOCKER_USERNAME }}/heart-disease-model:latest"
+          echo "🔗 Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/heart-disease-model"
