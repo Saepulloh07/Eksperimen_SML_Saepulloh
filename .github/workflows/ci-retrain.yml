@@ -16,18 +16,18 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
-          python-version: "3.12"
+          python-version: "3.12.7"
 
       - name: Create Conda Environment
         shell: bash -l {0}
         run: |
           conda env create -f Workflow-CI-Saepulloh/MLProject/conda.yaml
-          echo "heart-disease-env" >> $GITHUB_ENV
+          echo "CONDA_ENV_NAME=heart-disease-env" >> $GITHUB_ENV
 
       - name: Install Extra Packages
         shell: bash -l {0}
         run: |
-          conda activate heart-disease-env
+          conda activate ${{ env.CONDA_ENV_NAME }}
           pip install --no-cache-dir mlflow[extras] python-dotenv dagshub jq
 
       - name: Run MLflow Project (Retraining)
@@ -37,30 +37,31 @@ jobs:
           DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
           DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
-          conda activate heart-disease-env
+          conda activate ${{ env.CONDA_ENV_NAME }}
           cd Workflow-CI-Saepulloh/MLProject
 
-          # Cara resmi 2025 – tanpa --no-conda
+          # Cara resmi & aman 2025
           python -c "import mlflow; mlflow.run('.')"
 
-          # Ambil run ID terakhir
+          # Ambil Run ID terakhir
           LATEST_RUN_ID=$(mlflow runs list --experiment-name=Heart_Disease_Tuned_Models --max-results=1 --output-format=json | jq -r '.[0].info.run_id // empty')
           [ -z "$LATEST_RUN_ID" ] && LATEST_RUN_ID=$(mlflow runs list --experiment-name=Heart_Disease_Classification --max-results=1 --output-format=json | jq -r '.[0].info.run_id')
+
           echo "LATEST_RUN_ID=$LATEST_RUN_ID" >> $GITHUB_ENV
+          echo "Model berhasil dilatih! Run ID: $LATEST_RUN_ID"
 
       - name: Build Docker Image
         shell: bash -l {0}
         run: |
-          conda activate heart-disease-env
+          conda activate ${{ env.CONDA_ENV_NAME }}
           cd Workflow-CI-Saepulloh/MLProject
-          IMAGE="${{ secrets.DOCKER_USERNAME }}/heart-disease-model"
 
           mlflow models build-docker \
             --model-uri runs:/${{ env.LATEST_RUN_ID }}/model \
-            --name $IMAGE \
+            --name ${{ secrets.DOCKER_USERNAME }}/heart-disease-model \
             --enable-mlserver
 
-          echo "IMAGE_NAME=$IMAGE:latest" >> $GITHUB_ENV
+          echo "IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/heart-disease-model:latest" >> $GITHUB_ENV
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -70,12 +71,14 @@ jobs:
 
       - name: Push Docker Images
         run: |
-          docker tag ${{ env.IMAGE_NAME }} ${{ env.IMAGE_NAME }}:latest
-          docker tag ${{ env.IMAGE_NAME }} ${{ env.IMAGE_NAME }}:v$(date +%Y%m%d-%H%M)
-          docker push ${{ env.IMAGE_NAME }}:latest
-          docker push ${{ env.IMAGE_NAME }}:v$(date +%Y%m%d-%H%M)
+          IMAGE=${{ env.IMAGE_NAME }}
+          docker tag $IMAGE $IMAGE
+          docker tag $IMAGE ${{ secrets.DOCKER_USERNAME }}/heart-disease-model:v$(date +%Y%m%d-%H%M)
+
+          docker push $IMAGE
+          docker push ${{ secrets.DOCKER_USERNAME }}/heart-disease-model:v$(date +%Y%m%d-%H%M)
 
       - name: Success
         run: |
-          echo "SELESAI! Model retrained + Docker image terbaru sudah di-push"
+          echo "SELESAI 100%! Model retrained + Docker image terbaru sudah di-push"
           echo "https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/heart-disease-model"
