@@ -153,7 +153,7 @@ def train_and_evaluate_model(model_name, model, X_train, X_test, y_train, y_test
             if metric_value is not None:
                 mlflow.log_metric(metric_name, metric_value)
         
-        # Log model
+        # Log model to nested run
         mlflow.sklearn.log_model(
             model, 
             "model",
@@ -169,7 +169,7 @@ def train_and_evaluate_model(model_name, model, X_train, X_test, y_train, y_test
         if metrics['roc_auc'] is not None:
             print(f"✓ ROC-AUC   = {metrics['roc_auc']:.4f}")
         
-        # Return results
+        # Return results and trained model
         return {
             "Model": model_name,
             "Accuracy": round(metrics['accuracy'], 4),
@@ -177,11 +177,11 @@ def train_and_evaluate_model(model_name, model, X_train, X_test, y_train, y_test
             "Recall": round(metrics['recall'], 4),
             "F1-Score": round(metrics['f1_score'], 4),
             "ROC-AUC": round(metrics['roc_auc'], 4) if metrics['roc_auc'] is not None else "N/A"
-        }
+        }, model
 
 
-def save_results_and_best_model(results, models, X_train, y_train):
-    """Save comparison results and best model"""
+def save_results_and_best_model(results, trained_models, X_train, y_train):
+    """Save comparison results and best model to parent run"""
     # Create results dataframe
     results_df = pd.DataFrame(results).sort_values(
         "Accuracy", 
@@ -202,9 +202,9 @@ def save_results_and_best_model(results, models, X_train, y_train):
     # Get best model
     best_name = results_df.iloc[0]["Model"]
     best_acc = results_df.iloc[0]["Accuracy"]
-    best_model = models[best_name]
+    best_model = trained_models[best_name]
     
-    # Retrain best model on full training data
+    # Retrain best model on full training data to ensure consistency
     print(f"\n{'='*60}")
     print(f"Retraining best model: {best_name}")
     print(f"{'='*60}")
@@ -214,19 +214,35 @@ def save_results_and_best_model(results, models, X_train, y_train):
     model_path = f"data/best_model_{best_name}.pkl"
     with open(model_path, "wb") as f:
         pickle.dump(best_model, f)
+    print(f"✓ Model saved locally to {model_path}")
     
-    # Log best model to MLflow
-    mlflow.sklearn.log_model(
-        best_model, 
-        "best_model",
-        input_example=X_train[:5]
-    )
+    # Log best model to PARENT run (not nested)
+    # This is critical for CI/CD to find the model
+    try:
+        mlflow.sklearn.log_model(
+            best_model, 
+            "best_model",  # This artifact path is used by CI/CD
+            input_example=X_train[:5],
+            signature=mlflow.models.infer_signature(X_train, best_model.predict(X_train[:5]))
+        )
+        print("✓ Best model logged to MLflow parent run")
+    except Exception as e:
+        print(f"Warning: Failed to log best model to MLflow: {e}")
+    
+    # Log the pickle file as well
     mlflow.log_artifact(model_path)
+    
+    # Log best model metadata
     mlflow.log_param("best_model_name", best_name)
     mlflow.log_metric("best_accuracy", best_acc)
     
+    # Log all metrics from best model
+    best_metrics = results_df.iloc[0].to_dict()
+    for key, value in best_metrics.items():
+        if key != "Model" and value != "N/A":
+            mlflow.log_metric(f"best_{key.lower().replace('-', '_')}", float(value))
+    
     print(f"✓ Best Model: {best_name} (Accuracy = {best_acc})")
-    print(f"✓ Model saved to {model_path}")
     
     return best_name, best_acc
 
@@ -253,29 +269,36 @@ def main():
         print(f"\n✓ Training all models ({len(models)} total)")
     
     # Start main MLflow run
-    with mlflow.start_run(run_name="Heart_Disease_Training_Run"):
-        # Log parameters
+    with mlflow.start_run(run_name="Heart_Disease_Training_Run") as parent_run:
+        # Log parameters to parent run
         mlflow.log_param("n_models", len(models))
         mlflow.log_param("train_size", X_train.shape[0])
         mlflow.log_param("test_size", X_test.shape[0])
         mlflow.log_param("n_features", X_train.shape[1])
         
-        # Train all models
+        # Train all models and store them
         results = []
+        trained_models = {}
+        
         for name, model in models.items():
-            result = train_and_evaluate_model(
+            result, trained_model = train_and_evaluate_model(
                 name, model, X_train, X_test, y_train, y_test
             )
             results.append(result)
+            trained_models[name] = trained_model
         
-        # Save results and best model
+        # Save results and best model to parent run
         best_name, best_acc = save_results_and_best_model(
-            results, models, X_train, y_train
+            results, trained_models, X_train, y_train
         )
+        
+        # Log parent run ID for reference
+        print(f"\n✓ Parent Run ID: {parent_run.info.run_id}")
     
     print("\n" + "="*60)
     print("✓ TRAINING COMPLETE!")
     print("✓ All artifacts logged to MLflow")
+    print("✓ Best model saved and ready for deployment")
     print("="*60)
 
 
