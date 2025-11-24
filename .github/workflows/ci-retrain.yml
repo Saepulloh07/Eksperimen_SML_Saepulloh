@@ -1,0 +1,108 @@
+name: CI - Retrain & Build Docker Image
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - "README.md"
+      - "**.md"
+  workflow_dispatch:
+
+jobs:
+  retrain-and-build-docker:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      # 1. Checkout kode
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Miniconda
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.12"
+
+      # 3. Buat dan aktifkan environment dari conda.yaml yang ada di Workflow-CI-Saepulloh/MLProject
+      - name: Create Conda Environment
+        shell: bash -l {0}
+        run: |
+          conda env create -f Workflow-CI-Saepulloh/MLProject/conda.yaml
+          echo "CONDA_ENV=heart-disease-env" >> $GITHUB_ENV
+
+      # 4. Install tambahan jika diperlukan (mlflow, python-dotenv, dll)
+      - name: Install Additional Dependencies
+        shell: bash -l {0}
+        run: |
+          conda activate heart-disease-env
+          pip install --no-cache-dir mlflow[extras] python-dotenv dagshub
+
+      # 5. Jalankan MLflow Project (yang sudah Anda siapkan dengan benar)
+      - name: Run MLflow Project (Retraining)
+        shell: bash -l {0}
+        env:
+          # Jika pakai DagsHub, isi secrets di GitHub Settings → Secrets and variables → Actions
+          DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+          DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+        run: |
+          conda activate heart-disease-env
+          cd Workflow-CI-Saepulloh/MLProject
+
+          # Jalankan sebagai MLflow Project (entry point default = main → modelling.py atau modelling_tuning.py)
+          mlflow run . --no-conda
+
+          # Simpan run ID terakhir untuk build Docker
+          LATEST_RUN_ID=$(mlflow runs list --experiment-name=Heart_Disease_Tuned_Models --max-results=1 --output-format=json | jq -r '.[0].info.run_id // empty')
+          if [ -z "$LATEST_RUN_ID" ]; then
+            echo "Run ID tidak ditemukan! Coba pakai experiment lain."
+            # Fallback ke experiment baseline
+            LATEST_RUN_ID=$(mlflow runs list --experiment-name=Heart_Disease_Classification --max-results=1 --output-format=json | jq -r '.[0].info.run_id')
+          fi
+          echo "LATEST_RUN_ID=$LATEST_RUN_ID" >> $GITHUB_ENV
+
+      # 6. Build Docker Image dari model terbaik (menggunakan mlflow models build-docker)
+      - name: Build Docker Image with MLflow
+        shell: bash -l {0}
+        run: |
+          conda activate heart-disease-env
+          cd Workflow-CI-Saepulloh/MLProject
+
+          MODEL_URI="runs:/${{ env.LATEST_RUN_ID }}/model"
+          IMAGE_NAME="${{ secrets.DOCKER_USERNAME }}/heart-disease-model"
+
+          echo "Building Docker image dari model URI: $MODEL_URI"
+          mlflow models build-docker \
+            --model-uri $MODEL_URI \
+            --name $IMAGE_NAME \
+            --enable-mlserver
+
+          echo "IMAGE_NAME=$IMAGE_NAME:latest" >> $GITHUB_ENV
+
+      # 7. Login ke Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 8. Tag & Push Docker Image
+      - name: Push Docker Image to Docker Hub
+        run: |
+          docker tag ${{ env.IMAGE_NAME }} ${{ env.IMAGE_NAME }}:latest
+          docker tag ${{ env.IMAGE_NAME }} ${{ env.IMAGE_NAME }}:v$(date +%Y%m%d-%H%M)
+
+          docker push ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:v$(date +%Y%m%d-%H%M)
+
+      # 9. Success Notification
+      - name: Success Message
+        if: success()
+        run: |
+          echo "Retraining selesai!"
+          echo "Docker image baru tersedia di:"
+          echo "https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/heart-disease-model/tags"
