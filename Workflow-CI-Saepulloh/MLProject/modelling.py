@@ -1,5 +1,5 @@
 # ==========================================
-# MODELLING PENYAKIT JANTUNG - MLFLOW AUTOLOG
+# MODELLING PENYAKIT JANTUNG - FIX UNTUK GITHUB ACTIONS
 # ==========================================
 
 import pandas as pd
@@ -7,208 +7,185 @@ import numpy as np
 import pickle
 import mlflow
 import mlflow.sklearn
+import os
+import warnings
+warnings.filterwarnings('ignore')
+
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
-from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
-                             f1_score, roc_auc_score, confusion_matrix,
-                             classification_report)
-import warnings
-warnings.filterwarnings('ignore')
+from sklearn.metrics import (accuracy_score, precision_score, recall_score,
+                             f1_score, roc_auc_score, confusion_matrix)
 
 # ==========================================
-# 1. SETUP MLFLOW
+# 0. PASTIKAN FOLDER OUTPUT ADA
 # ==========================================
-print("\n" + "=" * 60)
-print("SETUP MLFLOW TRACKING (LOCAL)")
-print("=" * 60)
+os.makedirs("csv_output", exist_ok=True)
+os.makedirs("data", exist_ok=True)
+os.makedirs("mlruns", exist_ok=True)
 
-# Set tracking URI lokal
+# ==========================================
+# 1. SETUP MLFLOW (HANYA SEKALI!)
+# ==========================================
+print("\n" + "="*60)
+print("SETUP MLFLOW TRACKING")
+print("="*60)
+
 mlflow.set_tracking_uri("file:./mlruns")
 mlflow.set_experiment("Heart_Disease_Classification")
 
-print("✓ MLflow Tracking URI: ./mlruns")
-print("✓ Experiment: Heart_Disease_Classification")
-print("\n💡 Untuk melihat dashboard:")
-print("   mlflow ui --port 5000")
-print("   Buka: http://localhost:5000")
+# AKTIFKAN AUTOLOG HANYA SEKALI DI AWAL!
+mlflow.sklearn.autolog(
+    log_input_examples=True,
+    log_model_signatures=True,
+    log_models=True,
+    disable_for_unsupported_versions=True,
+    silent=True  # agar tidak terlalu berisik di CI
+)
+
+print("✓ MLflow siap (autolog aktif sekali di awal)")
 
 # ==========================================
 # 2. LOAD DATA PREPROCESSING
 # ==========================================
-print("\n" + "=" * 60)
+print("\n" + "="*60)
 print("MEMUAT DATA PREPROCESSING")
-print("=" * 60)
+print("="*60)
 
-# Load data dari PKL
-with open('data/preprocessing_objects.pkl', 'rb') as f:
-    data = pickle.load(f)
+try:
+    with open('data/preprocessing_objects.pkl', 'rb') as f:
+        data = pickle.load(f)
+except FileNotFoundError:
+    raise FileNotFoundError("File data/preprocessing_objects.pkl tidak ditemukan. Pastikan step preprocessing sudah dijalankan!")
 
 X_train = data['X_train']
-X_test = data['X_test']
+X_test  = data['X_test']
 y_train = data['y_train']
-y_test = data['y_test']
+y_test  = data['y_test']
 feature_names = data['feature_names']
 
-print(f"✓ Data train: {X_train.shape}")
-print(f"✓ Data test: {X_test.shape}")
-print(f"✓ Jumlah fitur: {len(feature_names)}")
-print(f"✓ Fitur: {feature_names}")
+print(f"✓ Train shape : {X_train.shape}")
+print(f"✓ Test shape  : {X_test.shape}")
+print(f"✓ Fitur ({len(feature_names)}): {feature_names}")
 
 # ==========================================
 # 3. DEFINISI MODEL
 # ==========================================
-print("\n" + "=" * 60)
+print("\n" + "="*60)
 print("DEFINISI MODEL")
-print("=" * 60)
+print("="*60)
 
 models = {
     'Logistic_Regression': LogisticRegression(random_state=42, max_iter=1000),
-    'Decision_Tree': DecisionTreeClassifier(random_state=42),
-    'Random_Forest': RandomForestClassifier(random_state=42, n_estimators=100),
-    'Gradient_Boosting': GradientBoostingClassifier(random_state=42, n_estimators=100),
-    'SVM': SVC(random_state=42, probability=True),
-    'KNN': KNeighborsClassifier(n_neighbors=5),
-    'Naive_Bayes': GaussianNB()
+    'Decision_Tree'      : DecisionTreeClassifier(random_state=42),
+    'Random_Forest'      : RandomForestClassifier(random_state=42, n_estimators=200),
+    'Gradient_Boosting'  : GradientBoostingClassifier(random_state=42, n_estimators=200),
+    'SVM'                : SVC(random_state=42, probability=True),
+    'KNN'                : KNeighborsClassifier(n_neighbors=5),
+    'Naive_Bayes'        : GaussianNB()
 }
 
-print(f"✓ Total model: {len(models)}")
-for name in models.keys():
-    print(f"  • {name}")
+print(f"✓ Total model yang akan dilatih: {len(models)}")
 
 # ==========================================
-# 4. TRAINING & EVALUASI MODEL
+# 4. TRAINING & EVALUASI
 # ==========================================
-print("\n" + "=" * 60)
-print("TRAINING & EVALUASI MODEL")
-print("=" * 60)
+print("\n" + "="*60)
+print("MULAI TRAINING SEMUA MODEL")
+print("="*60)
 
 results = []
 
-for model_name, model in models.items():
-    print(f"\n{'='*60}")
-    print(f"Training Model: {model_name}")
-    print(f"{'='*60}")
-    
-    # Aktifkan autolog MLflow
-    mlflow.sklearn.autolog(log_input_examples=True, 
-                           log_model_signatures=True,
-                           log_models=True)
-    
-    with mlflow.start_run(run_name=model_name, nested=True):
-        # Training model
-        print("⏳ Training model...")
-        model.fit(X_train, y_train)
-        print("✓ Training selesai")
-        
-        # Prediksi
-        y_pred = model.predict(X_test)
-        y_pred_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, 'predict_proba') else None
-        
-        # Evaluasi
-        accuracy = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred)
-        recall = recall_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-        
-        if y_pred_proba is not None:
-            roc_auc = roc_auc_score(y_test, y_pred_proba)
-        else:
-            roc_auc = None
-        
-        # Log tambahan metrics (manual)
-        mlflow.log_metric("accuracy", accuracy)
-        mlflow.log_metric("precision", precision)
-        mlflow.log_metric("recall", recall)
-        mlflow.log_metric("f1_score", f1)
-        if roc_auc:
-            mlflow.log_metric("roc_auc", roc_auc)
-        
-        # Tampilkan hasil
-        print(f"\n📊 HASIL EVALUASI:")
-        print(f"   Accuracy  : {accuracy:.4f}")
-        print(f"   Precision : {precision:.4f}")
-        print(f"   Recall    : {recall:.4f}")
-        print(f"   F1-Score  : {f1:.4f}")
-        if roc_auc:
-            print(f"   ROC-AUC   : {roc_auc:.4f}")
-        
-        # Confusion Matrix
-        cm = confusion_matrix(y_test, y_pred)
-        print(f"\n   Confusion Matrix:")
-        print(f"   {cm}")
-        
-        # Simpan hasil
-        results.append({
-            'Model': model_name,
-            'Accuracy': accuracy,
-            'Precision': precision,
-            'Recall': recall,
-            'F1-Score': f1,
-            'ROC-AUC': roc_auc if roc_auc else 'N/A'
-        })
-        
-        print(f"✓ Model {model_name} berhasil dilog ke MLflow")
+with mlflow.start_run(run_name="All_Models_Comparison", nested=False):
+    for model_name, model in models.items():
+        print(f"\n---> Training: {model_name}")
+
+        with mlflow.start_run(run_name=model_name, nested=True):
+            # Fit model
+            model.fit(X_train, y_train)
+
+            # Prediksi
+            y_pred = model.predict(X_test)
+            y_pred_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
+
+            # Hitung metrik
+            accuracy  = accuracy_score(y_test, y_pred)
+            precision = precision_score(y_test, y_pred)
+            recall    = recall_score(y_test, y_pred)
+            f1        = f1_score(y_test, y_pred)
+            roc_auc   = roc_auc_score(y_test, y_pred_proba) if y_pred_proba is not None else None
+
+            # Log metrik manual (autolog sudah menangani model & parameter)
+            mlflow.log_metric("accuracy", accuracy)
+            mlflow.log_metric("precision", precision)
+            mlflow.log_metric("recall", recall)
+            mlflow.log_metric("f1_score", f1)
+            if roc_auc is not None:
+                mlflow.log_metric("roc_auc", roc_auc)
+
+            # Simpan ke list hasil
+            results.append({
+                'Model'     : model_name,
+                'Accuracy'  : accuracy,
+                'Precision' : precision,
+                'Recall'    : recall,
+                'F1-Score'  : f1,
+                'ROC-AUC'   : roc_auc if roc_auc is not None else 'N/A'
+            })
+
+            print(f"     Accuracy: {accuracy:.4f} | F1: {f1:.4f} | ROC-AUC: {roc_auc:.4f}" if roc_auc else f"     Accuracy: {accuracy:.4f} | F1: {f1:.4f}")
 
 # ==========================================
-# 5. RINGKASAN HASIL
+# 5. RINGKASAN & SIMPAN HASIL
 # ==========================================
-print("\n" + "=" * 60)
-print("RINGKASAN HASIL SEMUA MODEL")
-print("=" * 60)
+print("\n" + "="*60)
+print("RINGKASAN HASIL")
+print("="*60)
 
 results_df = pd.DataFrame(results)
-results_df = results_df.sort_values('Accuracy', ascending=False).reset_index(drop=True)
+results_df = results_df.sort_values(by='Accuracy', ascending=False).reset_index(drop=True)
+print(results_df.to_string(index=False))
 
-print("\n" + results_df.to_string(index=False))
-
-# Simpan hasil ke CSV
-results_df.to_csv('csv_output/model_comparison_results.csv', index=False)
-print("\n✓ Hasil perbandingan disimpan: csv_output/model_comparison_results.csv")
-
-# ==========================================
-# 6. MODEL TERBAIK
-# ==========================================
-print("\n" + "=" * 60)
-print("MODEL TERBAIK")
-print("=" * 60)
-
-best_model_name = results_df.iloc[0]['Model']
-best_accuracy = results_df.iloc[0]['Accuracy']
-
-print(f"\n🏆 Model Terbaik: {best_model_name}")
-print(f"   Accuracy: {best_accuracy:.4f}")
+# Simpan CSV (untuk artifact di GitHub Actions)
+results_df.to_csv("csv_output/model_comparison_results.csv", index=False)
+print("\n✓ File CSV disimpan di csv_output/model_comparison_results.csv")
 
 # ==========================================
-# 7. SAVE BEST MODEL
+# 6. TENTUKAN & SIMPAN MODEL TERBAIK
 # ==========================================
-print("\n" + "=" * 60)
-print("MENYIMPAN MODEL TERBAIK")
-print("=" * 60)
+best_row = results_df.iloc[0]
+best_model_name = best_row['Model']
+best_accuracy = best_row['Accuracy']
 
-# Retrain best model dan simpan
+print(f"\nTROFI Model Terbaik: {best_model_name} (Accuracy = {best_accuracy:.4f})")
+
+# Retrain sekali lagi (agar 100% sama dengan yang dilog MLflow)
 best_model = models[best_model_name]
 best_model.fit(X_train, y_train)
 
 # Simpan dengan pickle
-model_path = f'data/best_model_{best_model_name}.pkl'
-with open(model_path, 'wb') as f:
+best_model_path = f"data/best_model_{best_model_name.replace(' ', '_')}.pkl"
+with open(best_model_path, 'wb') as f:
     pickle.dump(best_model, f)
 
-print(f"✓ Model terbaik disimpan: {model_path}")
+# Log model terbaik sebagai artifact utama
+with mlflow.start_run(run_name="Best_Model_Final"):
+    mlflow.sklearn.log_model(best_model, artifact_path="best_model")
+    mlflow.log_metric("best_accuracy", best_accuracy)
+    mlflow.log_artifact(best_model_path)
+
+print(f"✓ Model terbaik disimpan di: {best_model_path}")
+print(f"✓ Artefak model terbaik juga di-log ke MLflow")
 
 # ==========================================
 # SELESAI
 # ==========================================
-print("\n" + "=" * 60)
-print("MODELLING SELESAI!")
-print("=" * 60)
-print("\n📊 Untuk melihat hasil di MLflow Dashboard:")
-print("   1. Buka terminal/command prompt")
-print("   2. Jalankan: mlflow ui --port 5000")
-print("   3. Buka browser: http://localhost:5000")
-print("\n✓ Semua run tersimpan di folder: ./mlruns")
-print(f"✓ Best model: {best_model_name} (Accuracy: {best_accuracy:.4f})")
+print("\n" + "="*60)
+print("MODELLING SELESAI TANPA ERROR!")
+print("="*60)
+print("   Semua run tersimpan di folder ./mlruns")
+print("   Hasil perbandingan: csv_output/model_comparison_results.csv")
+print(f"   Best model ({best_model_name}) → {best_model_path}")
