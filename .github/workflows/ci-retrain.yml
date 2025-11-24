@@ -30,114 +30,121 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/conda.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/conda.yaml') }}
+          restore-keys: ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pandas numpy scikit-learn mlflow matplotlib seaborn python-dotenv dagshub
 
-      - name: Verify Installation
+      - name: Setup MLflow Local Tracking Only
         run: |
-          python --version
-          pip list | grep -E "mlflow|pandas|scikit-learn"
-          which mlflow
-
-      - name: Setup DagsHub Credentials (Only for Logging)
-        env:
-          DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-          DAGSHUB_REPO: ${{ secrets.DAGSHUB_REPO }}
-          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-        run: |
-          if [ -n "$DAGSHUB_TOKEN" ] && [ -n "$DAGSHUB_USERNAME" ] && [ -n "$DAGSHUB_REPO" ]; then
-            echo "Configuring DagsHub for logging only..."
-            export MLFLOW_TRACKING_URI="https://dagshub.com/${DAGSHUB_USERNAME}/${DAGSHUB_REPO}.mlflow"
-            export MLFLOW_TRACKING_USERNAME="${DAGSHUB_USERNAME}"
-            export MLFLOW_TRACKING_PASSWORD="${DAGSHUB_TOKEN}"
-            echo "MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}" >> $GITHUB_ENV
-            echo "MLFLOW_TRACKING_USERNAME=${MLFLOW_TRACKING_USERNAME}" >> $GITHUB_ENV
-            echo "MLFLOW_TRACKING_PASSWORD=${MLFLOW_TRACKING_PASSWORD}" >> $GITHUB_ENV
-          else
-            echo "No DagsHub credentials → using local tracking only"
-            export MLFLOW_TRACKING_URI="file:./mlruns"
-            echo "MLFLOW_TRACKING_URI=file:./mlruns" >> $GITHUB_ENV
-          fi
+          echo "MLFLOW_TRACKING_URI=file:./mlruns" >> $GITHUB_ENV
+          echo "Using local MLflow tracking (no remote dependency during build)"
 
       - name: Check Data Files
         run: |
           cd ${{ env.WORKING_DIR }}
           if [ ! -f "data/preprocessing_objects.pkl" ]; then
             echo "ERROR: preprocessing_objects.pkl not found!"
-            ls -la data/ || echo "data/ directory not found"
+            ls -la data/ || echo "data/ folder missing"
             exit 1
           fi
-          echo "Data files verified"
-          ls -lh data/preprocessing_objects.pkl
+          echo "Data verified"
 
       - name: Run Model Training
         run: |
           cd ${{ env.WORKING_DIR }}
-          echo "Starting model training..."
           python modelling.py --model_name all
-          echo "Training completed successfully"
 
-      - name: Get Latest Run ID and Best Model Info
-        id: get_run_id
+      - name: Extract Best Model Info
+        id: model_info
         run: |
           cd ${{ env.WORKING_DIR }}
-          python - <<'PY'
-          import mlflow
-          from mlflow.tracking import MlflowClient
-          import os
+          BEST_MODEL=$(ls data/best_model_*.pkl | head -1)
+          MODEL_NAME=$(basename "$BEST_MODEL" | sed 's/best_model_//' | sed 's/\.pkl$//')
+          echo "BEST_MODEL_FILE=$BEST_MODEL" >> $GITHUB_ENV
+          echo "BEST_MODEL_NAME=$MODEL_NAME" >> $GITHUB_ENV
+          echo "model_file=$(basename $BEST_MODEL)" >> $GITHUB_OUTPUT
+          echo "model_name=$MODEL_NAME" >> $GITHUB_OUTPUT
+          echo "Best model: $MODEL_NAME → $BEST_MODEL"
 
-          # Pastikan pakai local tracking
-          mlflow.set_tracking_uri("file:./mlruns")
-          client = MlflowClient(tracking_uri="file:./mlruns")
-
-          exp = client.get_experiment_by_name("Heart_Disease_Classification")
-          if not exp:
-              print("ERROR: Experiment not found!")
-              exit(1)
-
-          all_runs = client.search_runs(
-              experiment_ids=[exp.experiment_id],
-              order_by=["start_time DESC"],
-              max_results=50
-          )
-
-          parent_runs = [r for r in all_runs if "mlflow.parentRunId" not in r.data.tags]
-          if not parent_runs:
-              print("ERROR: No parent run found!")
-              exit(1)
-
-          latest_parent = parent_runs[0]
-          run_id = latest_parent.info.run_id
-          best_model = latest_parent.data.params.get("best_model_name", "Unknown")
-
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              f.write(f"LATEST_RUN_ID={run_id}\n")
-              f.write(f"BEST_MODEL_NAME={best_model}\n")
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"run_id={run_id}\n")
-              f.write(f"best_model_name={best_model}\n")
-
-          print(f"Latest Parent Run ID: {run_id}")
-          print(f"Best Model: {best_model}")
-          PY
-
-      - name: Verify Local Model File
+      - name: Create Inference Server Script
         run: |
           cd ${{ env.WORKING_DIR }}
-          echo "Best Model: ${{ env.BEST_MODEL_NAME }}"
-          if [ ! -f "data/best_model_${{ env.BEST_MODEL_NAME }}.pkl" ]; then
-            echo "ERROR: Best model file not found locally!"
-            ls -lh data/best_model_*.pkl || echo "No model files"
-            exit 1
-          fi
-          echo "Local model file verified"
+          cat > serve.py << 'EOF'
+import pickle
+import pandas as pd
+from fastapi import FastAPI
+from pydantic import BaseModel
+import uvicorn
+import os
+
+# Load model
+MODEL_PATH = os.getenv("MODEL_PATH", "best_model.pkl")
+with open(MODEL_PATH, "rb") as f:
+    model = pickle.load(f)
+
+app = FastAPI(title="Heart Disease Prediction API")
+
+class Features(BaseModel):
+    age: int
+    sex: int
+    cp: int
+    trestbps: int
+    chol: int
+    fbs: int
+    restecg: int
+    thalach: int
+    exang: int
+    oldpeak: float
+    slope: int
+    ca: int
+    thal: int
+
+@app.get("/ping")
+async def ping():
+    return {"message": "OK"}
+
+@app.post("/predict")
+async def predict(features: Features):
+    df = pd.DataFrame([features.dict()])
+    pred = model.predict(df)[0]
+    prob = model.predict_proba(df)[0].max()
+    return {
+        "prediction": int(pred),
+        "probability": float(prob),
+        "model": "${{ env.BEST_MODEL_NAME }}"
+    }
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)
+EOF
+          echo "serve.py created"
+
+      - name: Create Dockerfile
+        run: |
+          cd ${{ env.WORKING_DIR }}
+          cat > Dockerfile << EOF
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install --no-cache-dir fastapi uvicorn scikit-learn pandas pickle5
+
+# Copy model and server
+COPY ${{ steps.model_info.outputs.model_file }} /app/best_model.pkl
+COPY serve.py /app/serve.py
+
+EXPOSE 8080
+
+ENV MODEL_PATH=/app/best_model.pkl
+
+CMD ["uvicorn", "serve.py:app", "--host", "0.0.0.0", "--port", "8080"]
+EOF
+          echo "Dockerfile created with model: ${{ steps.model_info.outputs.model_file }}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -148,47 +155,14 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and Push Docker Image (Local Tracking + Reliable)
+      - name: Build and Push Docker Image
         run: |
           cd ${{ env.WORKING_DIR }}
-
-          echo "Building Docker image using LOCAL MLflow tracking..."
-          echo "Run ID: ${{ env.LATEST_RUN_ID }}"
-          echo "Best Model: ${{ env.BEST_MODEL_NAME }}"
-
-          # PAKSA local tracking URI sebelum build docker
-          export MLFLOW_TRACKING_URI="file:$(pwd)/mlruns"
-
-          # Gunakan models:/ URI → paling stabil untuk build-docker
-          mlflow models build-docker \
-            --model-uri "models:/Heart_Disease_Classification/${{ env.LATEST_RUN_ID }}/best_model" \
-            --name "${{ secrets.DOCKER_USERNAME }}/heart-disease-model" \
-            --enable-mlserver \
-            --no-push || {
-              echo "MLflow build-docker gagal, coba metode alternatif..."
-              
-              # Fallback: build manual dari local model
-              echo "FROM python:3.12-slim"
-              echo "RUN pip install mlserver mlserver-mlflow scikit-learn pandas numpy"
-              echo "COPY data/best_model_${{ env.BEST_MODEL_NAME }}.pkl /app/model.pkl"
-              echo "CMD [\"mlserver\", \"start\", \"/app\"]"
-            } >& Dockerfile.fallback
-
-          # Jika berhasil, lanjut push
-          if [ $? -eq 0 ]; then
-            echo "Docker image built successfully with MLflow"
-          else
-            echo "Menggunakan fallback Dockerfile..."
-            cp Dockerfile.fallback Dockerfile
-            docker build -t ${{ secrets.DOCKER_USERNAME }}/heart-disease-model .
-          fi
-
-          # Tag dan push
           IMAGE="${{ secrets.DOCKER_USERNAME }}/heart-disease-model"
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          SHORT_RUN_ID="${{ env.LATEST_RUN_ID:0:8}"
+          SHORT_RUN_ID=$(echo "${{ github.sha }}" | cut -c1-8)
 
-          docker tag $IMAGE:latest $IMAGE:latest
+          docker build -t $IMAGE:latest .
           docker tag $IMAGE:latest $IMAGE:v$TIMESTAMP
           docker tag $IMAGE:latest $IMAGE:$SHORT_RUN_ID
 
@@ -203,7 +177,7 @@ jobs:
       - name: Test Docker Image
         run: |
           docker run -d -p 5000:8080 --name test-container ${{ env.IMAGE_LATEST }}
-          sleep 15
+          sleep 10
           curl -f http://localhost:5000/ping || (docker logs test-container && exit 1)
           echo "Docker image test passed"
           docker stop test-container && docker rm test-container
@@ -211,20 +185,21 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: training-artifacts
+          name: model-and-results
           path: |
-            ${{ env.WORKING_DIR }}/csv_output/
             ${{ env.WORKING_DIR }}/data/best_model_*.pkl
-          retention-days: 30
+            ${{ env.WORKING_DIR }}/csv_output/
 
       - name: Summary
         run: |
-          echo "## CI/CD Berhasil!" >> $GITHUB_STEP_SUMMARY
-          echo "- Model: **${{ env.BEST_MODEL_NAME }}**" >> $GITHUB_STEP_SUMMARY
-          echo "- Run ID: \`${{ env.LATEST_RUN_ID }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Image: \`${{ env.IMAGE_LATEST }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "## CI/CD Success!" >> $GITHUB_STEP_SUMMARY
+          echo "- **Best Model**: ${{ env.BEST_MODEL_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Images**:" >> $GITHUB_STEP_SUMMARY
+          echo "  - \`${{ env.IMAGE_LATEST }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "  - \`${{ env.IMAGE_VERSIONED }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "  - \`${{ env.IMAGE_RUN }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.IMAGE_LATEST }}" >> $GITHUB_STEP_SUMMARY
           echo "docker run -p 5000:8080 ${{ env.IMAGE_LATEST }}" >> $GITHUB_STEP_SUMMARY
+          echo "curl -X POST http://localhost:5000/predict -H 'Content-Type: application/json' -d '{...}'" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
