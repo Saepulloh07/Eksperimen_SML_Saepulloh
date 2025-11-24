@@ -23,8 +23,8 @@ TRUE_ROOT = os.path.dirname(PARENT_DIR)
 
 MODEL_PATH         = os.path.join(TRUE_ROOT, "Membangun_model", "best_model_tuned.pkl")
 SCALER_PATH        = os.path.join(TRUE_ROOT, "Membangun_model", "scaler.joblib")
-FEATURE_NAMES_PATH = os.path.join(TRUE_ROOT, "preprosessing", "data", "output", "feature_names.pkl")
-TRAIN_STATS_PATH   = os.path.join(TRUE_ROOT, "preprosessing", "data", "output", "X_train_scaled.npy")
+FEATURE_NAMES_PATH = os.path.join(TRUE_ROOT, "preprocessing", "data", "output", "feature_names.pkl")
+TRAIN_STATS_PATH   = os.path.join(TRUE_ROOT, "preprocessing", "data", "output", "X_train_scaled.npy")
 
 print("\n" + "="*90)
 print("PROMETHEUS EXPORTER - PATH CHECK (FINAL)")

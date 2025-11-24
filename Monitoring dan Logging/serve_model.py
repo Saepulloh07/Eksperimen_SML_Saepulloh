@@ -30,10 +30,10 @@ ERROR_COUNTER = Counter(
 # Load model and preprocessor
 print("🚀 Loading model and preprocessor...")
 try:
-    model = joblib.load('wine_quality_model.pkl')
-    scaler = joblib.load('scaler.pkl')
+    model = joblib.load('../Membangun_model/wine_quality_model.pkl')
+    scaler = joblib.load('../preprocessing/data/output/scaler.pkl')
     
-    with open('feature_names.pkl', 'rb') as f:
+    with open('../preprocessing/data/output/feature_names.pkl', 'rb') as f:
         feature_names = pickle.load(f)
     
     print(f"✅ Model loaded successfully")

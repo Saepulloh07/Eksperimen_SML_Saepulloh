@@ -12,7 +12,7 @@ from datetime import datetime
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(ROOT, "Membangun_model", "best_model_tuned.pkl")
 SCALER_PATH = os.path.join(ROOT, "Membangun_model", "scaler.joblib")
-FEATURE_NAMES_PATH = os.path.join(ROOT, "preprosessing", "data", "output", "feature_names.pkl")
+FEATURE_NAMES_PATH = os.path.join(ROOT, "preprocessing", "data", "output", "feature_names.pkl")
 
 EXPORTER_URL = "http://localhost:8000"
 

@@ -31,7 +31,7 @@ def load_data():
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_path = os.path.join(script_dir, "..", "preprosessing", "data", "output")
+    base_path = os.path.join(script_dir, "..", "preprocessing", "data", "output")
     base_path = os.path.normpath(base_path)
 
     files = {
@@ -254,7 +254,7 @@ def train_model():
         mlflow.log_artifact('wine_quality_model.pkl')
         
         # Log scaler
-        mlflow.log_artifact('../preprosessing/data/output/scaler.pkl')
+        mlflow.log_artifact('../preprocessing/data/output/scaler.pkl')
         
         # Set tags
         mlflow.set_tag("developer", "Saepulloh")
