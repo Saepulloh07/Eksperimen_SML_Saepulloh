@@ -1,4 +1,4 @@
-name: CI - Retrain & Build Docker Image
+name: CI - Retrain & Deploy Docker Image
 
 on:
   push:
@@ -6,130 +6,118 @@ on:
   workflow_dispatch:
 
 jobs:
-  retrain-and-build-docker:
+  retrain-and-deploy:
     runs-on: ubuntu-latest
+
     env:
-      MLFLOW_TRACKING_URI: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/${{ secrets.DAGSHUB_REPO }}.mlflow
+      MLFLOW_TRACKING_URI: https://dagshub.com/$$ {{ secrets.DAGSHUB_USERNAME }}/ $${{ secrets.DAGSHUB_REPO }}.mlflow
       MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      steps:
+        - name: Checkout Code
+          uses: actions/checkout@v4
 
-      - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: "3.12.7"
-          activate-environment: heart-disease-env
+        - name: Setup Miniconda
+          uses: conda-incubator/setup-miniconda@v3
+          with:
+            python-version: "3.12.7"
+            activate-environment: heart-disease-env
 
-      - name: Install Conda Environment + MLflow
-        shell: bash -l {0}
-        run: |
-          conda env create -f Workflow-CI-Saepulloh/MLProject/conda.yaml
-          conda activate heart-disease-env
-          pip install --no-cache-dir mlflow[extras] dagshub python-dotenv
+        - name: Install Environment & MLflow
+          shell: bash -l {0}
+          run: |
+            conda env create -f Workflow-CI-Saepulloh/MLProject/conda.yaml
+            conda activate heart-disease-env
+            pip install --no-cache-dir mlflow[extras] dagshub
 
-      # ===================================================================
-      # 1. RETRAIN MODEL DENGAN MLproject (PAKAI CARA RESMI & AMAN 2025)
-      # ===================================================================
-      - name: Retrain All Models (MLflow Project)
-        shell: bash -l {0}
-        run: |
-          conda activate heart-disease-env
-          cd Workflow-CI-Saepulloh/MLProject
+        - name: Retrain Model (All Models) + Log to DagsHub
+          shell: bash -l {0}
+          run: |
+            conda activate heart-disease-env
+            cd Workflow-CI-Saepulloh/MLProject
 
-          # Jalankan semua model sekaligus (pakai parameter yang sudah kita buat)
-          mlflow run . -P model_name=all
+            # Pastikan tracking URI aktif
+            echo "Tracking URI: $MLFLOW_TRACKING_URI"
 
-          echo "Semua model berhasil dilatih dan di-log ke DagsHub MLflow!"
+            # Jalankan semua model
+            mlflow run . -P model_name=all
 
-      # ===================================================================
-      # 2. AMBIL RUN ID DARI MODEL TERBAIK SECARA AMAN (tanpa jq + tanpa opsi deprecated)
-      # ===================================================================
-      - name: Get Latest Run ID (Best Model)
-        shell: bash -l {0}
-        run: |
-          conda activate heart-disease-env
-          cd Workflow-CI-Saepulloh/MLProject
+            echo "Retraining selesai! Model sudah di-log ke DagsHub"
 
-          python << 'PY'
-          import mlflow
-          from mlflow.tracking import MlflowClient
+        - name: Get Best Model Run ID (Otomatis & Aman)
+          shell: bash -l {0}
+          run: |
+            conda activate heart-disease-env
+            cd Workflow-CI-Saepulloh/MLProject
 
-          client = MlflowClient()
-          exp = client.get_experiment_by_name("Heart_Disease_Classification")
-          if not exp:
-              raise ValueError("Experiment Heart_Disease_Classification tidak ditemukan!")
+            python - <<'PY'
+            import mlflow
+            from mlflow.tracking import MlflowClient
+            import os
 
-          # Cari run dengan best_accuracy tertinggi
-          runs = client.search_runs(
-              experiment_ids=[exp.experiment_id],
-              filter_string="metrics.best_accuracy IS NOT NULL",
-              order_by=["metrics.best_accuracy DESC"],
-              max_results=1
-          )
+            client = MlflowClient()
+            exp = client.get_experiment_by_name("Heart_Disease_Classification")
+            if not exp:
+                raise Exception("Experiment tidak ditemukan! Pastikan sudah ada run sebelumnya atau nama benar.")
 
-          if not runs:
-              raise ValueError("Tidak ada run dengan metric best_accuracy!")
+            # Cari run dengan akurasi terbaik
+            runs = client.search_runs(
+                experiment_ids=[exp.experiment_id],
+                filter_string="metrics.best_accuracy > 0",
+                order_by=["metrics.best_accuracy DESC"],
+                max_results=1
+            )
 
-          run_id = runs[0].info.run_id
-          accuracy = runs[0].data.metrics["best_accuracy"]
+            if not runs:
+                raise Exception("Tidak ada run dengan metric best_accuracy!")
 
-          print(f"Best Run ID   : {run_id}")
-          print(f"Accuracy      : {accuracy:.4f}")
+            run_id = runs[0].info.run_id
+            acc = runs[0].data.metrics["best_accuracy"]
 
-          # Simpan ke environment variable untuk step berikutnya
-          with open(os.environ['GITHUB_ENV'], "a") as f:
-              f.write(f"LATEST_RUN_ID={run_id}\n")
-              f.write(f"BEST_ACCURACY={accuracy:.4f}\n")
-          PY
+            print(f"Best Run ID : {run_id}")
+            print(f"Accuracy    : {acc:.4f}")
 
-      # ===================================================================
-      # 3. BUILD DOCKER IMAGE DARI MODEL TERBAIK
-      # ===================================================================
-      - name: Build & Push Docker Image
-        shell: bash -l {0}
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: |
-          conda activate heart-disease-env
-          cd Workflow-CI-Saepulloh/MLProject
+            # Simpan ke GitHub Env
+            with open(os.environ["GITHUB_ENV"], "a") as f:
+                f.write(f"BEST_RUN_ID={run_id}\n")
+                f.write(f"BEST_ACCURACY={acc:.4f}\n")
+            PY
 
-          IMAGE_NAME="${DOCKER_USERNAME/heart-disease-model
+        - name: Build & Push Docker Image
+          shell: bash -l {0}
+          env:
+            DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+            DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          run: |
+            conda activate heart-disease-env
+            cd Workflow-CI-Saepulloh/MLProject
 
-          echo "Membangun Docker image dari run: ${{ env.LATEST_RUN_ID }}"
+            IMAGE="heart-disease-model"
 
-          mlflow models build-docker \
-            --model-uri runs:/${{ env.LATEST_RUN_ID }}/best_model \
-            --name $IMAGE_NAME \
-            --enable-mlserver
+            mlflow models build-docker \
+              --model-uri runs:/${{ env.BEST_RUN_ID }}/best_model \
+              --name ${{ secrets.DOCKER_USERNAME }}/$IMAGE \
+              --enable-mlserver
 
-          # Tag versi latest + timestamp
-          docker tag $IMAGE_NAME $IMAGE_NAME:latest
-          docker tag $IMAGE_NAME $IMAGE_NAME:v$(date +%Y%m%d-%H%M%S)
+            # Tag
+            docker tag ${{ secrets.DOCKER_USERNAME }}/$IMAGE:latest \
+                       ${{ secrets.DOCKER_USERNAME }}/$$ IMAGE:v $$(date +%Y%m%d-%H%M%S)
 
-          # Login & Push
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
-          docker push $IMAGE_NAME:latest
-          docker push $IMAGE_NAME:v$(date +%Y%m%d-%H%M%S)
+            # Login & Push
+            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+            docker push ${{ secrets.DOCKER_USERNAME }}/$IMAGE:latest
+            docker push ${{ secrets.DOCKER_USERNAME }}/$$ IMAGE:v $$(date +%Y%m%d-%H%M%S)
 
-          echo "IMAGE_NAME=$IMAGE_NAME:latest" >> $GITHUB_ENV
+            echo "IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/$IMAGE:latest" >> $GITHUB_ENV
 
-      # ===================================================================
-      # 4. SUCCESS MESSAGE + LINK
-      # ===================================================================
-      - name: Success – Model & Docker Ready!
-        run: |
-          echo ""
-          echo "RETRAIN & DEPLOY BERHASIL 100%!"
-          echo "Model Terbaik   : Accuracy ${{ env.BEST_ACCURACY }}"
-          echo "Run ID          : ${{ env.LATEST_RUN_ID }}"
-          echo "Docker Image    : ${{ env.IMAGE_NAME }}"
-          echo ""
-          echo "Link MLflow     : https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/${{ secrets.DAGSHUB_REPO }}/experiments/"
-          echo "Link Docker Hub : https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/heart-disease-model"
-          echo ""
-          echo "Image siap dipakai di production / Streamlit / FastAPI / Kubernetes"
+        - name: Success – Model Deployed!
+          run: |
+            echo ""
+            echo "DEPLOY BERHASIL!"
+            echo "Model Terbaik : ${{ env.BEST_ACCURACY }} (Run ID       : ${{ env.BEST_RUN_ID }}"
+            echo "Docker Image  : ${{ env.IMAGE_NAME }}"
+            echo ""
+            echo "MLflow UI     : https://dagshub.com/$$ {{ secrets.DAGSHUB_USERNAME }}/ $${{ secrets.DAGSHUB_REPO }}/experiments/"
+            echo "Docker Hub   : https://hub.docker.com/r/${{ secrets.DOCKER_USERNAME }}/heart-disease-model"
