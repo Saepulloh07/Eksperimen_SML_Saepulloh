@@ -1,275 +1,214 @@
-import os
-import sys
+# ==========================================
+# MODELLING PENYAKIT JANTUNG - MLFLOW AUTOLOG
+# ==========================================
+
+import pandas as pd
+import numpy as np
 import pickle
 import mlflow
 import mlflow.sklearn
-import numpy as np
-import pandas as pd
-import joblib
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score,
-    f1_score, roc_auc_score, confusion_matrix,
-    classification_report, matthews_corrcoef,
-    cohen_kappa_score, log_loss, balanced_accuracy_score
-)
-from sklearn.model_selection import cross_val_score
-import matplotlib.pyplot as plt
-import seaborn as sns
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
+                             f1_score, roc_auc_score, confusion_matrix,
+                             classification_report)
 import warnings
 warnings.filterwarnings('ignore')
 
-# Import config
-from mlflow_config import setup_mlflow, get_or_create_experiment
+# ==========================================
+# 1. SETUP MLFLOW
+# ==========================================
+print("\n" + "=" * 60)
+print("SETUP MLFLOW TRACKING (LOCAL)")
+print("=" * 60)
 
+# Set tracking URI lokal
+mlflow.set_tracking_uri("file:./mlruns")
+mlflow.set_experiment("Heart_Disease_Classification")
 
-def load_data():
-    """Load preprocessed data"""
-    print("=" * 70)
-    print("📥 LOADING PREPROCESSED DATA")
-    print("=" * 70)
-    
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+print("✓ MLflow Tracking URI: ./mlruns")
+print("✓ Experiment: Heart_Disease_Classification")
+print("\n💡 Untuk melihat dashboard:")
+print("   mlflow ui --port 5000")
+print("   Buka: http://localhost:5000")
 
-    base_path = os.path.join(script_dir, "..", "preprocessing", "data", "output")
-    base_path = os.path.normpath(base_path)
+# ==========================================
+# 2. LOAD DATA PREPROCESSING
+# ==========================================
+print("\n" + "=" * 60)
+print("MEMUAT DATA PREPROCESSING")
+print("=" * 60)
 
-    files = {
-        'X_train': 'X_train_scaled.npy',
-        'X_test': 'X_test_scaled.npy',
-        'y_train': 'y_train.npy',
-        'y_test': 'y_test.npy',
-        'feature_names': 'feature_names.pkl',
-        'scaler': 'scaler.pkl'
-    }
-    
-    data = {}
-    for key, filename in files.items():
-        filepath = os.path.join(base_path, filename)
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"❌ File not found: {filepath}")
-        
-        if filename.endswith('.npy'):
-            data[key] = np.load(filepath)
-        elif filename.endswith('.pkl'):
-            with open(filepath, 'rb') as f:
-                data[key] = pickle.load(f)
-    
-    print(f"✅ Data loaded successfully from: {base_path}")
-    print(f"   - X_train: {data['X_train'].shape}")
-    print(f"   - X_test: {data['X_test'].shape}")
-    print(f"   - Features: {len(data['feature_names'])}")
-    
-    return data
+# Load data dari PKL
+with open('data/preprocessing_objects.pkl', 'rb') as f:
+    data = pickle.load(f)
 
+X_train = data['X_train']
+X_test = data['X_test']
+y_train = data['y_train']
+y_test = data['y_test']
+feature_names = data['feature_names']
 
-def calculate_metrics(model, X_train, X_test, y_train, y_test):
-    """
-    Calculate comprehensive metrics
-    """
-    print("\n📊 Calculating metrics...")
-    
-    # Predictions
-    y_train_pred = model.predict(X_train)
-    y_test_pred = model.predict(X_test)
-    y_test_proba = model.predict_proba(X_test)[:, 1]
-    
-    # Basic metrics
-    metrics = {
-        # Accuracy metrics
-        'train_accuracy': accuracy_score(y_train, y_train_pred),
-        'test_accuracy': accuracy_score(y_test, y_test_pred),
-        'balanced_accuracy': balanced_accuracy_score(y_test, y_test_pred),
-        
-        # Classification metrics
-        'precision': precision_score(y_test, y_test_pred),
-        'recall': recall_score(y_test, y_test_pred),
-        'f1_score': f1_score(y_test, y_test_pred),
-        
-        # ROC & Probability metrics
-        'roc_auc': roc_auc_score(y_test, y_test_proba),
-        'log_loss': log_loss(y_test, y_test_proba),
-        
-        # Statistical metrics
-        'matthews_corrcoef': matthews_corrcoef(y_test, y_test_pred),
-        'cohen_kappa': cohen_kappa_score(y_test, y_test_pred),
-        
-        # Overfitting indicator
-        'overfitting_gap': accuracy_score(y_train, y_train_pred) - accuracy_score(y_test, y_test_pred)
-    }
-    
-    # Cross-validation
-    cv_scores = cross_val_score(model, X_train, y_train, cv=5, scoring='accuracy')
-    metrics['cv_mean'] = cv_scores.mean()
-    metrics['cv_std'] = cv_scores.std()
-    
-    # Confusion matrix specificity
-    cm = confusion_matrix(y_test, y_test_pred)
-    tn, fp, fn, tp = cm.ravel()
-    metrics['specificity'] = tn / (tn + fp)
-    metrics['sensitivity'] = tp / (tp + fn)  # same as recall
-    
-    # False positive/negative rates
-    metrics['false_positive_rate'] = fp / (fp + tn)
-    metrics['false_negative_rate'] = fn / (fn + tp)
-    
-    print("✅ Metrics calculated:")
-    for name, value in metrics.items():
-        print(f"   - {name}: {value:.4f}")
-    
-    return metrics, y_test_pred, y_test_proba
+print(f"✓ Data train: {X_train.shape}")
+print(f"✓ Data test: {X_test.shape}")
+print(f"✓ Jumlah fitur: {len(feature_names)}")
+print(f"✓ Fitur: {feature_names}")
 
+# ==========================================
+# 3. DEFINISI MODEL
+# ==========================================
+print("\n" + "=" * 60)
+print("DEFINISI MODEL")
+print("=" * 60)
 
-def create_visualizations(model, X_test, y_test, y_pred, feature_names):
-    """
-    Create and save visualizations
-    """
-    print("\n🎨 Creating visualizations...")
-    
-    os.makedirs("artifacts", exist_ok=True)
-    
-    # 1. Confusion Matrix
-    plt.figure(figsize=(8, 6))
-    cm = confusion_matrix(y_test, y_pred)
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=['Bad Wine', 'Good Wine'],
-                yticklabels=['Bad Wine', 'Good Wine'])
-    plt.title('Confusion Matrix', fontsize=14, fontweight='bold')
-    plt.ylabel('True Label')
-    plt.xlabel('Predicted Label')
-    plt.tight_layout()
-    plt.savefig('artifacts/confusion_matrix.png', dpi=300)
-    plt.close()
-    
-    # 2. Feature Importance
-    fi_df = pd.DataFrame({
-        'feature': feature_names,
-        'importance': model.feature_importances_
-    }).sort_values('importance', ascending=False)
-    
-    plt.figure(figsize=(10, 8))
-    sns.barplot(data=fi_df.head(10), x='importance', y='feature', palette='viridis')
-    plt.title('Top 10 Feature Importance', fontsize=14, fontweight='bold')
-    plt.xlabel('Importance Score')
-    plt.tight_layout()
-    plt.savefig('artifacts/feature_importance.png', dpi=300)
-    plt.close()
-    
-    # 3. Classification Report
-    report = classification_report(y_test, y_pred, 
-                                   target_names=['Bad Wine', 'Good Wine'])
-    with open('artifacts/classification_report.txt', 'w') as f:
-        f.write(report)
-    
-    print("✅ Visualizations saved to artifacts/")
-    
-    return ['artifacts/confusion_matrix.png', 
-            'artifacts/feature_importance.png',
-            'artifacts/classification_report.txt']
+models = {
+    'Logistic_Regression': LogisticRegression(random_state=42, max_iter=1000),
+    'Decision_Tree': DecisionTreeClassifier(random_state=42),
+    'Random_Forest': RandomForestClassifier(random_state=42, n_estimators=100),
+    'Gradient_Boosting': GradientBoostingClassifier(random_state=42, n_estimators=100),
+    'SVM': SVC(random_state=42, probability=True),
+    'KNN': KNeighborsClassifier(n_neighbors=5),
+    'Naive_Bayes': GaussianNB()
+}
 
+print(f"✓ Total model: {len(models)}")
+for name in models.keys():
+    print(f"  • {name}")
 
-def train_model():
-    """
-    Main training function with MLflow tracking
-    """
-    # Setup MLflow
-    print("=" * 70)
-    print("🚀 WINE QUALITY MODEL TRAINING")
-    print("=" * 70)
+# ==========================================
+# 4. TRAINING & EVALUASI MODEL
+# ==========================================
+print("\n" + "=" * 60)
+print("TRAINING & EVALUASI MODEL")
+print("=" * 60)
+
+results = []
+
+for model_name, model in models.items():
+    print(f"\n{'='*60}")
+    print(f"Training Model: {model_name}")
+    print(f"{'='*60}")
     
-    setup_mlflow()
-    get_or_create_experiment("wine_quality_classification")
+    # Aktifkan autolog MLflow
+    mlflow.sklearn.autolog(log_input_examples=True, 
+                           log_model_signatures=True,
+                           log_models=True)
     
-    # Load data
-    data = load_data()
-    X_train = data['X_train']
-    X_test = data['X_test']
-    y_train = data['y_train']
-    y_test = data['y_test']
-    feature_names = data['feature_names']
-    
-    # Model parameters
-    params = {
-        'n_estimators': 100,
-        'max_depth': 10,
-        'min_samples_split': 5,
-        'min_samples_leaf': 2,
-        'max_features': 'sqrt',
-        'random_state': 42,
-        'n_jobs': -1
-    }
-    
-    # Start MLflow run
-    with mlflow.start_run(run_name="random_forest_baseline") as run:
-        print(f"\n📌 Run ID: {run.info.run_id}")
-        print(f"📌 Run Name: {run.info.run_name}")
-        
-        # Log parameters
-        print("\n📝 Logging parameters...")
-        for key, value in params.items():
-            mlflow.log_param(key, value)
-        
-        # Additional metadata
-        mlflow.log_param("train_samples", X_train.shape[0])
-        mlflow.log_param("test_samples", X_test.shape[0])
-        mlflow.log_param("n_features", X_train.shape[1])
-        mlflow.log_param("model_type", "RandomForest")
-        
-        # Train model
-        print("\n🏋️  Training model...")
-        model = RandomForestClassifier(**params)
+    with mlflow.start_run(run_name=model_name):
+        # Training model
+        print("⏳ Training model...")
         model.fit(X_train, y_train)
-        print("✅ Model trained successfully")
+        print("✓ Training selesai")
         
-        # Calculate metrics
-        metrics, y_pred, y_proba = calculate_metrics(
-            model, X_train, X_test, y_train, y_test
-        )
+        # Prediksi
+        y_pred = model.predict(X_test)
+        y_pred_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, 'predict_proba') else None
         
-        # Log metrics
-        print("\n📊 Logging metrics...")
-        for name, value in metrics.items():
-            mlflow.log_metric(name, float(value))
+        # Evaluasi
+        accuracy = accuracy_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred)
+        recall = recall_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred)
         
-        # Create visualizations
-        artifact_paths = create_visualizations(
-            model, X_test, y_test, y_pred, feature_names
-        )
+        if y_pred_proba is not None:
+            roc_auc = roc_auc_score(y_test, y_pred_proba)
+        else:
+            roc_auc = None
         
-        # Log artifacts
-        print("\n📦 Logging artifacts...")
-        for path in artifact_paths:
-            mlflow.log_artifact(path)
+        # Log tambahan metrics (manual)
+        mlflow.log_metric("accuracy", accuracy)
+        mlflow.log_metric("precision", precision)
+        mlflow.log_metric("recall", recall)
+        mlflow.log_metric("f1_score", f1)
+        if roc_auc:
+            mlflow.log_metric("roc_auc", roc_auc)
         
-        # Log model
-        print("\n💾 Logging model...")
-        mlflow.sklearn.log_model(
-            sk_model=model,
-            artifact_path="model",
-            registered_model_name="wine_quality_rf_model"
-        )
+        # Tampilkan hasil
+        print(f"\n📊 HASIL EVALUASI:")
+        print(f"   Accuracy  : {accuracy:.4f}")
+        print(f"   Precision : {precision:.4f}")
+        print(f"   Recall    : {recall:.4f}")
+        print(f"   F1-Score  : {f1:.4f}")
+        if roc_auc:
+            print(f"   ROC-AUC   : {roc_auc:.4f}")
         
-        # Save model locally
-        joblib.dump(model, 'wine_quality_model.pkl')
-        mlflow.log_artifact('wine_quality_model.pkl')
+        # Confusion Matrix
+        cm = confusion_matrix(y_test, y_pred)
+        print(f"\n   Confusion Matrix:")
+        print(f"   {cm}")
         
-        # Log scaler
-        mlflow.log_artifact('../preprocessing/data/output/scaler.pkl')
+        # Simpan hasil
+        results.append({
+            'Model': model_name,
+            'Accuracy': accuracy,
+            'Precision': precision,
+            'Recall': recall,
+            'F1-Score': f1,
+            'ROC-AUC': roc_auc if roc_auc else 'N/A'
+        })
         
-        # Set tags
-        mlflow.set_tag("developer", "Saepulloh")
-        mlflow.set_tag("algorithm", "RandomForest")
-        mlflow.set_tag("dataset", "Wine Quality")
-        
-        print("\n" + "=" * 70)
-        print("✅ TRAINING COMPLETED SUCCESSFULLY!")
-        print("=" * 70)
-        print(f"\n📊 Test Accuracy: {metrics['test_accuracy']:.4f}")
-        print(f"📊 F1-Score: {metrics['f1_score']:.4f}")
-        print(f"📊 ROC-AUC: {metrics['roc_auc']:.4f}")
-        print(f"\n🌐 View results: {mlflow.get_tracking_uri()}")
-        print(f"🔑 Run ID: {run.info.run_id}")
+        print(f"✓ Model {model_name} berhasil dilog ke MLflow")
 
+# ==========================================
+# 5. RINGKASAN HASIL
+# ==========================================
+print("\n" + "=" * 60)
+print("RINGKASAN HASIL SEMUA MODEL")
+print("=" * 60)
 
-if __name__ == "__main__":
-    train_model()
+results_df = pd.DataFrame(results)
+results_df = results_df.sort_values('Accuracy', ascending=False).reset_index(drop=True)
+
+print("\n" + results_df.to_string(index=False))
+
+# Simpan hasil ke CSV
+results_df.to_csv('csv_output/model_comparison_results.csv', index=False)
+print("\n✓ Hasil perbandingan disimpan: csv_output/model_comparison_results.csv")
+
+# ==========================================
+# 6. MODEL TERBAIK
+# ==========================================
+print("\n" + "=" * 60)
+print("MODEL TERBAIK")
+print("=" * 60)
+
+best_model_name = results_df.iloc[0]['Model']
+best_accuracy = results_df.iloc[0]['Accuracy']
+
+print(f"\n🏆 Model Terbaik: {best_model_name}")
+print(f"   Accuracy: {best_accuracy:.4f}")
+
+# ==========================================
+# 7. SAVE BEST MODEL
+# ==========================================
+print("\n" + "=" * 60)
+print("MENYIMPAN MODEL TERBAIK")
+print("=" * 60)
+
+# Retrain best model dan simpan
+best_model = models[best_model_name]
+best_model.fit(X_train, y_train)
+
+# Simpan dengan pickle
+model_path = f'data/best_model_{best_model_name}.pkl'
+with open(model_path, 'wb') as f:
+    pickle.dump(best_model, f)
+
+print(f"✓ Model terbaik disimpan: {model_path}")
+
+# ==========================================
+# SELESAI
+# ==========================================
+print("\n" + "=" * 60)
+print("MODELLING SELESAI!")
+print("=" * 60)
+print("\n📊 Untuk melihat hasil di MLflow Dashboard:")
+print("   1. Buka terminal/command prompt")
+print("   2. Jalankan: mlflow ui --port 5000")
+print("   3. Buka browser: http://localhost:5000")
+print("\n✓ Semua run tersimpan di folder: ./mlruns")
+print(f"✓ Best model: {best_model_name} (Accuracy: {best_accuracy:.4f})")
