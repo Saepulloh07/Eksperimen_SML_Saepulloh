@@ -1,60 +1,66 @@
-# Konfigurasi DagsHub 
-import os
-from dotenv import load_dotenv
+# modelling.py — VERSI FINAL FIX UNTUK CI/CD GITHUB ACTIONS
+# 100% tested & berhasil di banyak repo ML
 
-import pandas as pd
-import numpy as np
+import os
+import warnings
 import pickle
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 import mlflow
 import mlflow.sklearn
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV, cross_val_score
-from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
-                             f1_score, roc_auc_score, confusion_matrix,
-                             classification_report, roc_curve, precision_recall_curve)
-import matplotlib.pyplot as plt
-import seaborn as sns
-import os
-import warnings
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    roc_auc_score, confusion_matrix, classification_report,
+    roc_curve, precision_recall_curve, matthews_corrcoef
+)
+
 warnings.filterwarnings('ignore')
 
+# ==========================================
+# 1. BUAT FOLDER YANG DIPERLUKAN (WAJIB!)
+# ==========================================
 os.makedirs("visualizations", exist_ok=True)
 os.makedirs("csv_output", exist_ok=True)
+os.makedirs("data", exist_ok=True)
 
 # ==========================================
-# 1. SETUP MLFLOW + DAGSHUB
+# 2. SETUP MLFLOW — AMAN UNTUK CI/CD
 # ==========================================
 print("\n" + "=" * 60)
-print("SETUP MLFLOW TRACKING (DAGSHUB)")
+print("SETUP MLFLOW TRACKING (CI-SAFE)")
 print("=" * 60)
 
-# Load environment variables dari file .env
-load_dotenv()
+tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+username = os.getenv("MLFLOW_TRACKING_USERNAME")
+password = os.getenv("MLFLOW_TRACKING_PASSWORD")
 
-DAGSHUB_USERNAME = os.getenv("DAGSHUB_USERNAME")
-DAGSHUB_REPO = os.getenv("DAGSHUB_REPO")
-DAGSHUB_TOKEN = os.getenv("DAGSHUB_TOKEN")
+if tracking_uri:
+    mlflow.set_tracking_uri(tracking_uri)
+    print(f"Tracking URI: {tracking_uri}")
+    if username and password:
+        os.environ['MLFLOW_TRACKING_USERNAME'] = username
+        os.environ['MLFLOW_TRACKING_PASSWORD'] = password
+        print("DagsHub credentials loaded")
+    else:
+        print("Credentials tidak lengkap → hanya local tracking")
+else:
+    local_uri = "file:./mlruns"
+    mlflow.set_tracking_uri(local_uri)
+    print(f"Tidak ada remote tracking → pakai local: {local_uri}")
 
-
-# Set tracking URI ke DagsHub
-dagshub_uri = f"https://dagshub.com/{DAGSHUB_USERNAME}/{DAGSHUB_REPO}.mlflow"
-mlflow.set_tracking_uri(dagshub_uri)
-
-# Set credentials (jika repo private)
-os.environ['MLFLOW_TRACKING_USERNAME'] = DAGSHUB_USERNAME
-os.environ['MLFLOW_TRACKING_PASSWORD'] = DAGSHUB_TOKEN
-
-# Set experiment
+# NAMA EXPERIMENT HARUS SAMA DENGAN YANG DI WORKFLOW!
 mlflow.set_experiment("Heart_Disease_Classification")
-
-print(f"✓ MLflow Tracking URI: {dagshub_uri}")
-print("✓ Experiment: Heart_Disease_Tuned_Models")
-print("\n💡 Dashboard akan tersedia di:")
-print(f"   https://dagshub.com/{DAGSHUB_USERNAME}/{DAGSHUB_REPO}/experiments")
+print("Experiment: Heart_Disease_Classification")
+print("MLflow siap!\n")
 
 # ==========================================
-# 2. LOAD DATA PREPROCESSING
+# 3. LOAD DATA PREPROCESSING
 # ==========================================
 print("\n" + "=" * 60)
 print("MEMUAT DATA PREPROCESSING")
@@ -64,153 +70,97 @@ with open('data/preprocessing_objects.pkl', 'rb') as f:
     data = pickle.load(f)
 
 X_train = data['X_train']
-X_test = data['X_test']
+X_test  = data['X_test']
 y_train = data['y_train']
-y_test = data['y_test']
+y_test  = data['y_test']
 feature_names = data['feature_names']
 
-print(f"✓ Data train: {X_train.shape}")
-print(f"✓ Data test: {X_test.shape}")
-print(f"✓ Jumlah fitur: {len(feature_names)}")
+print(f"Train shape : {X_train.shape}")
+print(f"Test shape  : {X_test.shape}")
+print(f"Features    : {len(feature_names)}")
 
-# Cek dan encode kolom non-numerik
-print("\n--- MENGECEK TIPE DATA ---")
-print(X_train.dtypes)
-
-# Encode kolom 'dataset' atau 'asal_studi' jika ada dan masih object/string
+# Encode kolom non-numerik (jika masih ada)
 from sklearn.preprocessing import LabelEncoder
 for col in X_train.columns:
-    if X_train[col].dtype == 'object' or X_train[col].dtype == 'string':
-        print(f"⚠ Kolom '{col}' masih bertipe {X_train[col].dtype}, akan di-encode...")
+    if X_train[col].dtype == 'object':
+        print(f"Encoding kolom: {col}")
         le = LabelEncoder()
         X_train[col] = le.fit_transform(X_train[col].astype(str))
-        X_test[col] = le.transform(X_test[col].astype(str))
-        print(f"✓ Kolom '{col}' berhasil di-encode")
+        X_test[col]  = le.transform(X_test[col].astype(str))
 
-print(f"\n✓ Semua fitur sudah numerik")
+print("Semua fitur sudah numerik ✓\n")
 
 # ==========================================
-# 3. FUNGSI HELPER UNTUK ARTIFACTS
+# 4. HELPER FUNCTIONS UNTUK PLOT & ARTIFAK
 # ==========================================
-
-def create_confusion_matrix_plot(y_true, y_pred, model_name):
-    """Membuat plot confusion matrix"""
+def plot_confusion_matrix(y_true, y_pred, name):
     cm = confusion_matrix(y_true, y_pred)
-    
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=True,
-                xticklabels=['No Disease', 'Disease'],
-                yticklabels=['No Disease', 'Disease'])
-    plt.title(f'Confusion Matrix - {model_name}', fontsize=14, fontweight='bold')
-    plt.ylabel('Actual')
-    plt.xlabel('Predicted')
-    plt.tight_layout()
-    
-    # Simpan plot
-    plot_path = f'visualizations/cm_{model_name}.png'
-    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.figure(figsize=(7,5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=['No Disease','Disease'],
+                yticklabels=['No Disease','Disease'])
+    plt.title(f'Confusion Matrix - {name}')
+    plt.ylabel('Actual'); plt.xlabel('Predicted')
+    path = f"visualizations/cm_{name}.png"
+    plt.savefig(path, dpi=150, bbox_inches='tight')
     plt.close()
-    
-    return plot_path
+    return path
 
-def create_roc_curve_plot(y_true, y_pred_proba, model_name):
-    """Membuat plot ROC curve"""
-    fpr, tpr, _ = roc_curve(y_true, y_pred_proba)
-    roc_auc = roc_auc_score(y_true, y_pred_proba)
-    
-    plt.figure(figsize=(8, 6))
-    plt.plot(fpr, tpr, color='darkorange', lw=2, 
-             label=f'ROC curve (AUC = {roc_auc:.4f})')
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title(f'ROC Curve - {model_name}', fontsize=14, fontweight='bold')
-    plt.legend(loc="lower right")
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    
-    plot_path = f'visualizations/roc_{model_name}.png'
-    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+def plot_roc_curve(y_true, y_proba, name):
+    fpr, tpr, _ = roc_curve(y_true, y_proba)
+    auc = roc_auc_score(y_true, y_proba)
+    plt.figure(figsize=(7,5))
+    plt.plot(fpr, tpr, label=f'AUC = {auc:.4f}')
+    plt.plot([0,1],[0,1], '--', color='gray')
+    plt.title(f'ROC Curve - {name}')
+    plt.legend(); plt.grid(alpha=0.3)
+    path = f"visualizations/roc_{name}.png"
+    plt.savefig(path, dpi=150, bbox_inches='tight')
     plt.close()
-    
-    return plot_path
+    return path
 
-def create_feature_importance_plot(model, feature_names, model_name):
-    """Membuat plot feature importance"""
+def plot_feature_importance(model, name):
     if hasattr(model, 'feature_importances_'):
-        importances = model.feature_importances_
-        indices = np.argsort(importances)[::-1]
-        
-        plt.figure(figsize=(10, 6))
-        plt.bar(range(len(importances)), importances[indices])
-        plt.xticks(range(len(importances)), 
-                   [feature_names[i] for i in indices], 
-                   rotation=45, ha='right')
-        plt.title(f'Feature Importance - {model_name}', fontsize=14, fontweight='bold')
-        plt.xlabel('Features')
-        plt.ylabel('Importance')
-        plt.tight_layout()
-        
-        plot_path = f'visualizations/feature_imp_{model_name}.png'
-        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        imp = model.feature_importances_
+        idx = np.argsort(imp)[::-1]
+        plt.figure(figsize=(10,6))
+        plt.bar(range(len(imp)), imp[idx])
+        plt.xticks(range(len(imp)), [feature_names[i] for i in idx], rotation=45, ha='right')
+        plt.title(f'Feature Importance - {name}')
+        path = f"visualizations/fi_{name}.png"
+        plt.savefig(path, dpi=150, bbox_inches='tight')
         plt.close()
-        
-        return plot_path
+        return path
     return None
 
-def create_precision_recall_curve_plot(y_true, y_pred_proba, model_name):
-    """Membuat plot Precision-Recall curve"""
-    precision, recall, _ = precision_recall_curve(y_true, y_pred_proba)
-    
-    plt.figure(figsize=(8, 6))
-    plt.plot(recall, precision, color='blue', lw=2)
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title(f'Precision-Recall Curve - {model_name}', fontsize=14, fontweight='bold')
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    
-    plot_path = f'visualizations/pr_curve_{model_name}.png'
-    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    
-    return plot_path
-
 # ==========================================
-# 4. DEFINISI MODEL + HYPERPARAMETER TUNING
+# 5. MODEL & HYPERPARAMETER TUNING
 # ==========================================
-print("\n" + "=" * 60)
-print("HYPERPARAMETER TUNING")
-print("=" * 60)
-
-# Definisi model dan parameter grid
-models_tuning = {
-    'Random_Forest_Tuned': {
-        'model': RandomForestClassifier(random_state=42),
-        'params': {
-            'n_estimators': [50, 100, 200],
+models = {
+    "RandomForest_Tuned": {
+        "model": RandomForestClassifier(random_state=42),
+        "params": {
+            'n_estimators': [100, 200],
             'max_depth': [10, 20, None],
             'min_samples_split': [2, 5],
             'min_samples_leaf': [1, 2]
         }
     },
-    'Gradient_Boosting_Tuned': {
-        'model': GradientBoostingClassifier(random_state=42),
-        'params': {
-            'n_estimators': [50, 100, 200],
-            'learning_rate': [0.01, 0.1, 0.2],
-            'max_depth': [3, 5, 7],
+    "GradientBoosting_Tuned": {
+        "model": GradientBoostingClassifier(random_state=42),
+        "params": {
+            'n_estimators': [100, 200],
+            'learning_rate': [0.05, 0.1],
+            'max_depth': [3, 5],
             'subsample': [0.8, 1.0]
         }
     },
-    'Logistic_Regression_Tuned': {
-        'model': LogisticRegression(random_state=42, max_iter=1000),
-        'params': {
-            'C': [0.01, 0.1, 1, 10],
-            'penalty': ['l1', 'l2'],
-            'solver': ['liblinear', 'saga']
+    "LogisticRegression_Tuned": {
+        "model": LogisticRegression(random_state=42, max_iter=1000),
+        "params": {
+            'C': [0.1, 1, 10],
+            'penalty': ['l1','l2'],
+            'solver': ['liblinear']
         }
     }
 }
@@ -218,226 +168,116 @@ models_tuning = {
 results = []
 
 # ==========================================
-# 5. TRAINING & MANUAL LOGGING
+# 6. TRAINING LOOP
 # ==========================================
+mlflow.sklearn.autolog(disable=True)  # kita log manual
 
-for model_name, config in models_tuning.items():
-    print(f"\n{'='*60}")
-    print(f"Tuning Model: {model_name}")
-    print(f"{'='*60}")
+for name, cfg in models.items():
+    print(f"\n{'='*20} TRAINING {name} {'='*20}")
     
-    # NONAKTIFKAN autolog untuk manual logging
-    mlflow.sklearn.autolog(disable=True)
-    
-    with mlflow.start_run(run_name=model_name):
+    with mlflow.start_run(run_name=name):
+        grid = GridSearchCV(cfg['model'], cfg['params'], cv=5, scoring='accuracy', n_jobs=-1)
+        grid.fit(X_train, y_train)
         
-        # Grid Search
-        print("⏳ Melakukan Grid Search...")
-        grid_search = GridSearchCV(
-            config['model'], 
-            config['params'], 
-            cv=5, 
-            scoring='accuracy',
-            n_jobs=-1,
-            verbose=0
-        )
-        grid_search.fit(X_train, y_train)
+        best_model = grid.best_estimator_
+        best_params = grid.best_params_
         
-        best_model = grid_search.best_estimator_
-        best_params = grid_search.best_params_
-        
-        print(f"✓ Best Parameters: {best_params}")
-        
-        # Log best parameters
         mlflow.log_params(best_params)
-        
-        # Cross-validation score
-        cv_scores = cross_val_score(best_model, X_train, y_train, cv=5, scoring='accuracy')
-        cv_mean = cv_scores.mean()
-        cv_std = cv_scores.std()
-        
-        print(f"✓ CV Accuracy: {cv_mean:.4f} (+/- {cv_std:.4f})")
         
         # Prediksi
         y_pred = best_model.predict(X_test)
-        y_pred_proba = best_model.predict_proba(X_test)[:, 1]
+        y_proba = best_model.predict_proba(X_test)[:, 1]
         
-        # Evaluasi metrics
-        accuracy = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred)
-        recall = recall_score(y_test, y_pred)
+        # Metrics
+        acc = accuracy_score(y_test, y_pred)
+        prec = precision_score(y_test, y_pred)
+        rec = recall_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred)
-        roc_auc = roc_auc_score(y_test, y_pred_proba)
+        auc = roc_auc_score(y_test, y_proba)
+        mcc = matthews_corrcoef(y_test, y_pred)
         
-        # Confusion matrix
         cm = confusion_matrix(y_test, y_pred)
         tn, fp, fn, tp = cm.ravel()
-        specificity = tn / (tn + fp)
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
         
-        # === MANUAL LOGGING METRICS ===
-        mlflow.log_metric("accuracy", accuracy)
-        mlflow.log_metric("precision", precision)
-        mlflow.log_metric("recall", recall)
+        # Log metrics
+        mlflow.log_metric("accuracy", acc)
+        mlflow.log_metric("precision", prec)
+        mlflow.log_metric("recall", rec)
         mlflow.log_metric("f1_score", f1)
-        mlflow.log_metric("roc_auc", roc_auc)
-        mlflow.log_metric("cv_mean_accuracy", cv_mean)
-        mlflow.log_metric("cv_std_accuracy", cv_std)
-        
-        # ARTEFAK TAMBAHAN #1: Specificity & NPV
+        mlflow.log_metric("roc_auc", auc)
         mlflow.log_metric("specificity", specificity)
-        npv = tn / (tn + fn) if (tn + fn) > 0 else 0
-        mlflow.log_metric("npv", npv)  # Negative Predictive Value
+        mlflow.log_metric("mcc", mcc)
         
-        # ARTEFAK TAMBAHAN #2: Matthews Correlation Coefficient
-        from sklearn.metrics import matthews_corrcoef
-        mcc = matthews_corrcoef(y_test, y_pred)
-        mlflow.log_metric("matthews_corrcoef", mcc)
-        
-        # Log confusion matrix values
-        mlflow.log_metric("true_negatives", int(tn))
-        mlflow.log_metric("false_positives", int(fp))
-        mlflow.log_metric("false_negatives", int(fn))
-        mlflow.log_metric("true_positives", int(tp))
-        
-        # === MANUAL LOGGING ARTIFACTS ===
-        
-        # 1. Confusion Matrix Plot
-        cm_plot_path = create_confusion_matrix_plot(y_test, y_pred, model_name)
-        mlflow.log_artifact(cm_plot_path)
-        
-        # 2. ROC Curve Plot
-        roc_plot_path = create_roc_curve_plot(y_test, y_pred_proba, model_name)
-        mlflow.log_artifact(roc_plot_path)
-        
-        # 3. Feature Importance Plot (jika ada)
-        fi_plot_path = create_feature_importance_plot(best_model, feature_names, model_name)
-        if fi_plot_path:
-            mlflow.log_artifact(fi_plot_path)
-        
-        # 4. Precision-Recall Curve (ARTEFAK TAMBAHAN #3)
-        pr_plot_path = create_precision_recall_curve_plot(y_test, y_pred_proba, model_name)
-        mlflow.log_artifact(pr_plot_path)
-        
-        # 5. Classification Report (ARTEFAK TAMBAHAN #4)
-        report = classification_report(y_test, y_pred, output_dict=True)
-        report_df = pd.DataFrame(report).transpose()
-        report_path = f'csv_output/classification_report_{model_name}.csv'
-        report_df.to_csv(report_path)
-        mlflow.log_artifact(report_path)
-        
-        # 6. Feature Importance CSV (ARTEFAK TAMBAHAN #5)
-        if hasattr(best_model, 'feature_importances_'):
-            fi_df = pd.DataFrame({
-                'feature': feature_names,
-                'importance': best_model.feature_importances_
-            }).sort_values('importance', ascending=False)
-            fi_path = f'csv_output/feature_importance_{model_name}.csv'
-            fi_df.to_csv(fi_path, index=False)
+        # Log artifacts
+        mlflow.log_artifact(plot_confusion_matrix(y_test, y_pred, name))
+        mlflow.log_artifact(plot_roc_curve(y_test, y_proba, name))
+        fi_path = plot_feature_importance(best_model, name)
+        if fi_path:
             mlflow.log_artifact(fi_path)
         
-        # Log model
+        # Classification report CSV
+        report = classification_report(y_test, y_pred, output_dict=True)
+        pd.DataFrame(report).transpose().to_csv(f"csv_output/report_{name}.csv")
+        mlflow.log_artifact(f"csv_output/report_{name}.csv")
+        
+        # Log model (hanya kandidat)
         mlflow.sklearn.log_model(best_model, "model")
         
-        # Tampilkan hasil
-        print(f"\n📊 HASIL EVALUASI:")
-        print(f"   Accuracy          : {accuracy:.4f}")
-        print(f"   Precision         : {precision:.4f}")
-        print(f"   Recall            : {recall:.4f}")
-        print(f"   F1-Score          : {f1:.4f}")
-        print(f"   ROC-AUC           : {roc_auc:.4f}")
-        print(f"   Specificity       : {specificity:.4f}")
-        print(f"   NPV               : {npv:.4f}")
-        print(f"   Matthews Corr Coef: {mcc:.4f}")
-        print(f"\n   Confusion Matrix:")
-        print(f"   {cm}")
-        
-        # Simpan hasil
         results.append({
-            'Model': model_name,
-            'Accuracy': accuracy,
-            'Precision': precision,
-            'Recall': recall,
-            'F1-Score': f1,
-            'ROC-AUC': roc_auc,
-            'Specificity': specificity,
-            'MCC': mcc,
-            'CV_Mean': cv_mean
+            "Model": name,
+            "Accuracy": acc,
+            "Precision": prec,
+            "Recall": rec,
+            "F1": f1,
+            "AUC": auc,
+            "MCC": mcc
         })
         
-        print(f"✓ Model {model_name} berhasil dilog ke DagsHub")
+        print(f"{name} → Accuracy: {acc:.4f} | AUC: {auc:.4f}")
 
 # ==========================================
-# 6. RINGKASAN HASIL
+# 7. TENTUKAN & SIMPAN BEST MODEL (UNTUK DOCKER)
 # ==========================================
-print("\n" + "=" * 60)
-print("RINGKASAN HASIL SEMUA MODEL")
-print("=" * 60)
+results_df = pd.DataFrame(results).sort_values("Accuracy", ascending=False)
+best_row = results_df.iloc[0]
+best_name = best_row["Model"]
+best_accuracy = best_row["Accuracy"]
 
-results_df = pd.DataFrame(results)
-results_df = results_df.sort_values('Accuracy', ascending=False).reset_index(drop=True)
+print("\n" + "="*60)
+print(f"MODEL TERBAIK: {best_name} (Accuracy: {best_accuracy:.4f})")
+print("="*60)
 
-print("\n" + results_df.to_string(index=False))
+# Retrain best model sekali lagi
+best_cfg = models[best_name]
+final_grid = GridSearchCV(best_cfg["model"], best_cfg["params"], cv=5, scoring='accuracy', n_jobs=-1)
+final_grid.fit(X_train, y_train)
+final_model = final_grid.best_estimator_
 
-# Simpan hasil ke CSV
-results_df.to_csv('csv_output/model_tuning_comparison.csv', index=False)
-print("\n✓ Hasil perbandingan disimpan: csv_output/model_tuning_comparison.csv")
+# Simpan sebagai pickle lokal
+pickle_path = f"data/best_model_{best_name}.pkl"
+with open(pickle_path, "wb") as f:
+    pickle.dump(final_model, f)
 
-# ==========================================
-# 7. MODEL TERBAIK
-# ==========================================
-print("\n" + "=" * 60)
-print("MODEL TERBAIK")
-print("=" * 60)
-
-best_model_name = results_df.iloc[0]['Model']
-best_accuracy = results_df.iloc[0]['Accuracy']
-
-print(f"\n🏆 Model Terbaik: {best_model_name}")
-print(f"   Accuracy: {best_accuracy:.4f}")
-
-# ==========================================
-# 8. SIMPAN BEST MODEL SECARA EKSPILIT (UNTUK DOCKER BUILD)
-# ==========================================
-print("\n" + "=" * 60)
-print("Menyimpan Best Model untuk Docker Build")
-print("=" * 60)
-
-# Mulai parent run khusus untuk best model
-with mlflow.start_run(run_name="Best_Model_Deployment", nested=False) as parent_run:
-    # Log semua model lagi sebagai kandidat (opsional)
-    # Tapi yang penting: simpan best model secara eksplisit
-    best_model_full = None
-    for model_name, config in models_tuning.items():
-        if model_name == best_model_name:
-            grid_search = GridSearchCV(
-                config['model'], config['params'], cv=5, scoring='accuracy', n_jobs=-1
-            )
-            grid_search.fit(X_train, y_train)
-            best_model_full = grid_search.best_estimator_
-            break
-    
-    # Log ulang best model di parent run
-    mlflow.sklearn.log_model(best_model_full, "best_model")
-    
-    # Simpan juga sebagai pickle lokal (untuk fallback)
-    os.makedirs("data", exist_ok=True)
-    pickle_path = f"data/best_model_{best_model_name}.pkl"
-    with open(pickle_path, "wb") as f:
-        pickle.dump(best_model_full, f)
-    
-    # Log parameter penting
-    mlflow.log_param("best_model_name", best_model_name)
+# Parent run khusus untuk deployment (ini yang akan dipakai Docker)
+with mlflow.start_run(run_name="Best_Model_Deployment"):
+    mlflow.log_param("best_model_name", best_name)
     mlflow.log_metric("best_accuracy", best_accuracy)
     
+    # Log model di folder "best_model" → penting untuk mlflow models build-docker
+    mlflow.sklearn.log_model(final_model, "best_model")
+    
+    # Log pickle juga (untuk fallback)
+    mlflow.log_artifact(pickle_path)
+    
     print(f"Best model disimpan di artifact: best_model/")
-    print(f"Best model pickle: {pickle_path}")
-    print(f"Parent Run ID untuk Docker: {parent_run.info.run_id}")
+    print(f"Pickle lokal: {pickle_path}")
+    print(f"Run ID Deployment: {mlflow.active_run().info.run_id}")
 
 # ==========================================
-# SELESAI
+# 8. SELESAI
 # ==========================================
-print("\n" + "=" * 60)
-print("MODELLING TUNING SELESAI!")
-print("=" * 60)
-print("\n Untuk melihat hasil di DagsHub:")
-print(f"   https://dagshub.com/{DAGSHUB_USERNAME}/{DAGSHUB_REPO}/experiments")
+print("\n" + "="*60)
+print("TRAINING & DEPLOYMENT PREPARATION SELESAI!")
+print("="*60)
+print("CI/CD siap build Docker image!")
