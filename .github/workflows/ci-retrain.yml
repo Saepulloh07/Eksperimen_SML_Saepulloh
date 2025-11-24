@@ -96,51 +96,53 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR }}
 
-          # Get latest run ID and best model name from MLflow
-          python -c "
+          python - <<'EOF'
           import mlflow
           import os
-          import json
 
-          mlflow.set_tracking_uri('file:./mlruns')
+          # Set tracking URI lokal
+          mlflow.set_tracking_uri("file:./mlruns")
           client = mlflow.tracking.MlflowClient()
 
-          # Get experiment
-          experiment = client.get_experiment_by_name('Heart_Disease_Classification')
+          experiment_name = "Heart_Disease_Classification"
+          experiment = client.get_experiment_by_name(experiment_name)
+
           if experiment is None:
-              print('ERROR: Experiment not found')
+              print(f"ERROR: Experiment '{experiment_name}' not found!")
               exit(1)
 
-          # Get latest parent run (not nested)
+          # CARA BARU: Cari run yang TIDAK memiliki tag mlflow.parentRunId (artinya parent run)
           runs = client.search_runs(
               experiment_ids=[experiment.experiment_id],
-              filter_string='tags.mlflow.parentRunId = \"\"',
-              order_by=['start_time DESC'],
+              filter_string="tags.mlflow.parentRunId IS NULL",  # Ini yang benar di MLflow 2.9+
+              order_by=["start_time DESC"],
               max_results=1
           )
 
           if not runs:
-              print('ERROR: No parent runs found')
+              print("ERROR: No parent runs found! Available runs:")
+              all_runs = client.search_runs(experiment_ids=[experiment.experiment_id])
+              for r in all_runs[:10]:
+                  parent_id = r.data.tags.get("mlflow.parentRunId", "None")
+                  print(f" - Run ID: {r.info.run_id[:8]} | Parent: {parent_id}")
               exit(1)
 
           run = runs[0]
           run_id = run.info.run_id
+          best_model_name = run.data.params.get("best_model_name", "Unknown")
 
-          # Get best model name from params
-          best_model_name = run.data.params.get('best_model_name', 'Unknown')
+          # Simpan ke environment dan output
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"LATEST_RUN_ID={run_id}\n")
+              f.write(f"BEST_MODEL_NAME={best_model_name}\n")
 
-          # Save to environment
-          with open(os.environ['GITHUB_ENV'], 'a') as f:
-              f.write(f'LATEST_RUN_ID={run_id}\n')
-              f.write(f'BEST_MODEL_NAME={best_model_name}\n')
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"run_id={run_id}\n")
+              f.write(f"best_model_name={best_model_name}\n")
 
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'run_id={run_id}\n')
-              f.write(f'best_model_name={best_model_name}\n')
-
-          print(f'✅ Latest Run ID: {run_id}')
-          print(f'✅ Best Model: {best_model_name}')
-          "
+          print(f"Latest Parent Run ID: {run_id}")
+          print(f"Best Model: {best_model_name}")
+          EOF
 
       - name: Verify Model Artifact and Structure
         run: |
