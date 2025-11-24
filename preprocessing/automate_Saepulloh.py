@@ -320,7 +320,7 @@ def predict_new_data(pipeline_objects, new_data_df):
 
 if __name__ == "__main__":
     hasil = preprocess_heart_disease_pipeline(
-        file_path="heart_disease.csv",
+        file_path="heart_disease_uci.csv",
         output_dir="heart_disease_pipeline",
         visualize=True,
         save_outputs=True
