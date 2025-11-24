@@ -1,6 +1,0 @@
-FROM python:3.10
-WORKDIR /app
-COPY 3.prometheus_exporter.py .
-COPY 7.Inference.py .
-RUN pip install prometheus-client flask psutil numpy joblib requests
-CMD ["python", "3.prometheus_exporter.py"]

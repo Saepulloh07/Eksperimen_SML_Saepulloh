@@ -14,7 +14,7 @@ on:
       - "preprocessing/heart_disease_uci.csv"
       - "preprocessing/automate_Saepulloh.py"
       - "preprocessing/requirements.txt"
-  workflow_dispatch: # bisa dijalankan manual
+  workflow_dispatch:
 
 jobs:
   preprocess:
@@ -29,10 +29,10 @@ jobs:
         uses: actions/checkout@v4
 
       # 2. Setup Python
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12.7
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12.7"
           cache: "pip"
 
       # 3. Install dependencies

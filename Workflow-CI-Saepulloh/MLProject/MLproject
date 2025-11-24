@@ -1,7 +1,7 @@
-name: wine-quality-ci
+name: HeartDiseaseModelling
 
 conda_env: conda.yaml
 
 entry_points:
   main:
-    command: python modelling_tuning.py
+    command: "python modelling.py"
