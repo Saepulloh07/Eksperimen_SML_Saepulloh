@@ -1,9 +1,10 @@
 # ==========================================
-# modelling.py – VERSI AMAN UNTUK GITHUB ACTIONS + mlflow run .
+# modelling.py – VERSI PALING STABIL UNTUK CI/CD
 # ==========================================
 
 import os
 import pickle
+import argparse
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -19,43 +20,44 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
-# ==========================================
-# 0. Buat folder yang diperlukan
-# ==========================================
+
+# =============== ARGUMENT PARSER ===============
+parser = argparse.ArgumentParser()
+parser.add_argument("--model_name", type=str, default="all",
+                    help="Nama model atau 'all' untuk semua model")
+args = parser.parse_args()
+
+
+# =============== SETUP ===============
 os.makedirs("csv_output", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
-# ==========================================
-# 1. Setup MLflow (hanya sekali!)
-# ==========================================
 mlflow.set_tracking_uri("file:./mlruns")
 mlflow.set_experiment("Heart_Disease_Classification")
 
-# Autolog SKLEARN AKTIF HANYA SEKALI
-mlflow.sklearn.autolog(
-    log_input_examples=True,
-    log_model_signatures=True,
-    log_models=True,
-    silent=True
-)
+# Autolog sekali saja
+mlflow.sklearn.autolog(log_input_examples=True,
+                       log_model_signatures=True,
+                       log_models=True,
+                       silent=True)
 
 print("MLflow siap – autolog aktif")
 
-# ==========================================
-# 2. Load data preprocessing
-# ==========================================
-with open('data/preprocessing_objects.pkl', 'rb') as f:
+
+# =============== LOAD DATA ===============
+with open("data/preprocessing_objects.pkl", "rb") as f:
     data = pickle.load(f)
 
-X_train, X_test = data['X_train'], data['X_test']
-y_train, y_test = data['y_train'], data['y_test']
-feature_names = data['feature_names']
+X_train = data["X_train"]
+X_test  = data["X_test"]
+y_train = data["y_train"]
+y_test  = data["y_test"]
+feature_names = data["feature_names"]
 
-print(f"Data loaded – Train: {X_train.shape}, Test: {X_test.shape}")
+print(f"Data loaded → Train {X_train.shape}, Test {X_test.shape}")
 
-# ==========================================
-# 3. Daftar model
-# ==========================================
+
+# =============== DAFTAR MODEL ===============
 models = {
     "Logistic_Regression": LogisticRegression(random_state=42, max_iter=1000),
     "Decision_Tree":       DecisionTreeClassifier(random_state=42),
@@ -63,83 +65,77 @@ models = {
     "Gradient_Boosting":   GradientBoostingClassifier(random_state=42, n_estimators=200),
     "SVM":                 SVC(random_state=42, probability=True),
     "KNN":                 KNeighborsClassifier(n_neighbors=5),
-    "Naive_Bayes":       GaussianNB(),
+    "Naive_Bayes":         GaussianNB(),
 }
 
-# ==========================================
-# 4. Training + evaluasi (PAKAI NESTED RUN SAJA!)
-# ==========================================
+# Jika hanya satu model yang diminta
+if args.model_name != "all" and args.model_name in models:
+    models = {args.model_name: models[args.model_name]}
+
+
+# =============== TRAINING & LOGGING ===============
 results = []
 
-# TIDAK PERLU start_run() di sini → mlflow run . sudah buatkan run utama
-for model_name, model in models.items():
-    print(f"\nTraining → {model_name}")
+# TIDAK ADA start_run() MANUAL → mlflow run . sudah buat run utama
+for name, model in models.items():
+    print(f"\nTraining → {name}")
 
-    # Nested run untuk tiap model (ini yang benar!)
-    with mlflow.start_run(run_name=model_name, nested=True):
-        # Train
-        model.fit(X_train, y_train)
+    # Fit & predict
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    y_prob = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
 
-        # Predict
-        y_pred = model.predict(X_test)
-        y_prob = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
+    # Metrics
+    acc = accuracy_score(y_test, y_pred)
+    pre = precision_score(y_test, y_pred)
+    rec = recall_score(y_test, y_pred)
+    f1  = f1_score(y_test, y_pred)
+    auc = roc_auc_score(y_test, y_prob) if y_prob is not None else None
 
-        # Metrics
-        acc = accuracy_score(y_test, y_pred)
-        pre = precision_score(y_test, y_pred)
-        rec = recall_score(y_test, y_pred)
-        f1  = f1_score(y_test, y_pred)
-        auc = roc_auc_score(y_test, y_prob) if y_prob is not None else None
+    # Log metrik (autolog sudah log model + params)
+    mlflow.log_metric("accuracy",  acc)
+    mlflow.log_metric("precision", pre)
+    mlflow.log_metric("recall",    rec)
+    mlflow.log_metric("f1_score",  f1)
+    if auc is not None:
+        mlflow.log_metric("roc_auc", auc)
 
-        # Log manual (autolog sudah log model + params)
-        mlflow.log_metric("accuracy", acc)
-        mlflow.log_metric("precision", pre)
-        mlflow.log_metric("recall", rec)
-        mlflow.log_metric("f1_score", f1)
-        if auc is not None:
-            mlflow.log_metric("roc_auc", auc)
+    results.append({
+        "Model":      name,
+        "Accuracy":  round(acc, 4),
+        "Precision": round(pre, 4),
+        "Recall":    round(rec, 4),
+        "F1-Score":  round(f1, 4),
+        "ROC-AUC":   round(auc, 4) if auc is not None else "N/A"
+    })
 
-        results.append({
-            "Model":      model_name,
-            "Accuracy":  round(acc, 4),
-            "Precision": round(pre, 4),
-            "Recall":    round(rec, 4),
-            "F1-Score":  round(f1, 4),
-            "ROC-AUC":   round(auc, 4) if auc is not None else "N/A"
-        })
+    print(f"   Accuracy = {acc:.4f} | F1 = {f1:.4f}" + (f" | AUC = {auc:.4f}" if auc else ""))
 
-        print(f"   Accuracy: {acc:.4f} | F1: {f1:.4f} | AUC: {auc:.4f}" if auc else f"   Accuracy: {acc:.4f} | F1: {f1:.4f}")
 
-# ==========================================
-# 5. Simpan ringkasan
-# ==========================================
-results_df = pd.DataFrame(results)
-results_df = results_df.sort_values("Accuracy", ascending=False).reset_index(drop=True)
-
+# =============== SIMPAN HASIL & MODEL TERBAIK ===============
+results_df = pd.DataFrame(results).sort_values("Accuracy", ascending=False).reset_index(drop=True)
 print("\nRINGKASAN HASIL")
 print(results_df.to_string(index=False))
 
+# Simpan CSV
 results_df.to_csv("csv_output/model_comparison_results.csv", index=False)
+mlflow.log_artifact("csv_output/model_comparison_results.csv")
 
-# ==========================================
-# 6. Simpan model terbaik
-# ==========================================
-best_model_name = results_df.iloc[0]["Model"]
-best_accuracy   = results_df.iloc[0]["Accuracy"]
+# Simpan model terbaik
+best_name = results_df.iloc[0]["Model"]
+best_acc  = results_df.iloc[0]["Accuracy"]
+best_model = models[best_name]
+best_model.fit(X_train, y_train)  # retrain sekali lagi
 
-print(f"\nModel Terbaik: {best_model_name} (Accuracy = {best_accuracy})")
-
-# Retrain & simpan
-best_model = models[best_model_name]
-best_model.fit(X_train, y_train)
-
-model_path = f"data/best_model_{best_model_name}.pkl"
-with open(model_path, 'wb') as f:
+model_path = f"data/best_model_{best_name}.pkl"
+with open(model_path, "wb") as f:
     pickle.dump(best_model, f)
 
-# Log model terbaik sebagai artifact di run utama (bukan nested)
-mlflow.log_artifact(model_path, artifact_path="best_model")
-mlflow.log_metric("best_accuracy", best_accuracy)
+# Log model terbaik
+mlflow.sklearn.log_model(best_model, artifact_path="best_model")
+mlflow.log_artifact(model_path)
+mlflow.log_metric("best_accuracy", best_acc)
 
-print(f"Model terbaik disimpan → {model_path}")
-print("SELESAI! Semua run tersimpan di folder ./mlruns")
+print(f"\nModel Terbaik: {best_name} (Accuracy = {best_acc})")
+print(f"Model disimpan → {model_path}")
+print("SELESAI – semua artefak sudah di-log ke MLflow!")
