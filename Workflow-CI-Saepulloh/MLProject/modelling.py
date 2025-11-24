@@ -301,6 +301,16 @@ def main():
     print("✓ Best model saved and ready for deployment")
     print("="*60)
 
-
+def setup_environment():
+    os.makedirs("csv_output", exist_ok=True)
+    os.makedirs("data", exist_ok=True)
+    
+    # Paksa local tracking di CI, hormati env jika ada
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment("Heart_Disease_Classification")
+    
+    print(f"MLflow tracking URI: {tracking_uri}")
+    
 if __name__ == "__main__":
     main()
