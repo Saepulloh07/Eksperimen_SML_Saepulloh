@@ -96,53 +96,57 @@ jobs:
         run: |
           cd ${{ env.WORKING_DIR }}
 
-          python - <<'EOF'
+          python - <<'PY'
           import mlflow
+          from mlflow.tracking import MlflowClient
           import os
 
-          # Set tracking URI lokal
           mlflow.set_tracking_uri("file:./mlruns")
-          client = mlflow.tracking.MlflowClient()
+          client = MlflowClient()
 
-          experiment_name = "Heart_Disease_Classification"
-          experiment = client.get_experiment_by_name(experiment_name)
-
-          if experiment is None:
-              print(f"ERROR: Experiment '{experiment_name}' not found!")
+          exp_name = "Heart_Disease_Classification"
+          exp = client.get_experiment_by_name(exp_name)
+          if not exp:
+              print(f"ERROR: Experiment '{exp_name}' tidak ditemukan!")
               exit(1)
 
-          # CARA BARU: Cari run yang TIDAK memiliki tag mlflow.parentRunId (artinya parent run)
-          runs = client.search_runs(
-              experiment_ids=[experiment.experiment_id],
-              filter_string="tags.mlflow.parentRunId IS NULL",  # Ini yang benar di MLflow 2.9+
+          # CARA YANG BENAR & PASTI JALAN di FileStore (mlruns folder)
+          # Ambil semua run, lalu filter manual yang TIDAK punya tag parentRunId
+          all_runs = client.search_runs(
+              experiment_ids=[exp.experiment_id],
               order_by=["start_time DESC"],
-              max_results=1
+              max_results=50
           )
 
-          if not runs:
-              print("ERROR: No parent runs found! Available runs:")
-              all_runs = client.search_runs(experiment_ids=[experiment.experiment_id])
+          parent_runs = [
+              r for r in all_runs
+              if "mlflow.parentRunId" not in r.data.tags
+          ]
+
+          if not parent_runs:
+              print("ERROR: Tidak ada parent run ditemukan!")
+              print("Daftar run terbaru:")
               for r in all_runs[:10]:
-                  parent_id = r.data.tags.get("mlflow.parentRunId", "None")
-                  print(f" - Run ID: {r.info.run_id[:8]} | Parent: {parent_id}")
+                  parent = r.data.tags.get("mlflow.parentRunId", "TIDAK ADA → INI PARENT")
+                  print(f"  → {r.info.run_id} | parentRunId: {parent}")
               exit(1)
 
-          run = runs[0]
-          run_id = run.info.run_id
-          best_model_name = run.data.params.get("best_model_name", "Unknown")
+          latest_parent = parent_runs[0]
+          run_id = latest_parent.info.run_id
+          best_model = latest_parent.data.params.get("best_model_name", "Unknown")
 
-          # Simpan ke environment dan output
+          # Simpan ke GITHUB_ENV dan GITHUB_OUTPUT
           with open(os.environ["GITHUB_ENV"], "a") as f:
               f.write(f"LATEST_RUN_ID={run_id}\n")
-              f.write(f"BEST_MODEL_NAME={best_model_name}\n")
+              f.write(f"BEST_MODEL_NAME={best_model}\n")
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"run_id={run_id}\n")
-              f.write(f"best_model_name={best_model_name}\n")
+              f.write(f"best_model_name={best_model}\n")
 
           print(f"Latest Parent Run ID: {run_id}")
-          print(f"Best Model: {best_model_name}")
-          EOF
+          print(f"Best Model: {best_model}")
+          PY
 
       - name: Verify Model Artifact and Structure
         run: |
