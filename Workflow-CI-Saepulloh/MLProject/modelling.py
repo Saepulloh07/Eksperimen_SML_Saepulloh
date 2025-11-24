@@ -1,6 +1,7 @@
-# ==========================================
-# modelling.py – VERSI PALING STABIL UNTUK CI/CD
-# ==========================================
+"""
+modelling.py - Fixed Version for CI/CD
+Trains multiple ML models for heart disease classification
+"""
 
 import os
 import pickle
@@ -18,132 +19,265 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
-
-from dotenv import load_dotenv
-
-load_dotenv()  
-
-os.environ["MLFLOW_TRACKING_URI"] = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
-os.environ["MLFLOW_TRACKING_USERNAME"] = os.getenv("MLFLOW_TRACKING_USERNAME", "")
-os.environ["MLFLOW_TRACKING_PASSWORD"] = os.getenv("MLFLOW_TRACKING_PASSWORD", "")
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, 
+    f1_score, roc_auc_score
+)
 
 
-# =============== ARGUMENT PARSER ===============
-parser = argparse.ArgumentParser()
-parser.add_argument("--model_name", type=str, default="all",
-                    help="Nama model atau 'all' untuk semua model")
-args = parser.parse_args()
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='Train heart disease classification models')
+    parser.add_argument(
+        "--model_name", 
+        type=str, 
+        default="all",
+        help="Model name or 'all' to train all models"
+    )
+    return parser.parse_args()
 
 
-# =============== SETUP ===============
-os.makedirs("csv_output", exist_ok=True)
-os.makedirs("data", exist_ok=True)
-
-mlflow.set_tracking_uri("file:./mlruns")
-mlflow.set_experiment("Heart_Disease_Classification")
-
-# Autolog sekali saja
-mlflow.sklearn.autolog(log_input_examples=True,
-                       log_model_signatures=True,
-                       log_models=True,
-                       silent=True)
-
-print("MLflow siap – autolog aktif")
+def setup_environment():
+    """Setup directories and MLflow tracking"""
+    os.makedirs("csv_output", exist_ok=True)
+    os.makedirs("data", exist_ok=True)
+    
+    # Set MLflow tracking URI
+    mlflow.set_tracking_uri("file:./mlruns")
+    mlflow.set_experiment("Heart_Disease_Classification")
+    
+    print("✓ Environment setup complete")
 
 
-# =============== LOAD DATA ===============
-with open("data/preprocessing_objects.pkl", "rb") as f:
-    data = pickle.load(f)
-
-X_train = data["X_train"]
-X_test  = data["X_test"]
-y_train = data["y_train"]
-y_test  = data["y_test"]
-feature_names = data["feature_names"]
-
-print(f"Data loaded → Train {X_train.shape}, Test {X_test.shape}")
-
-
-# =============== DAFTAR MODEL ===============
-models = {
-    "Logistic_Regression": LogisticRegression(random_state=42, max_iter=1000),
-    "Decision_Tree":       DecisionTreeClassifier(random_state=42),
-    "Random_Forest":       RandomForestClassifier(random_state=42, n_estimators=200),
-    "Gradient_Boosting":   GradientBoostingClassifier(random_state=42, n_estimators=200),
-    "SVM":                 SVC(random_state=42, probability=True),
-    "KNN":                 KNeighborsClassifier(n_neighbors=5),
-    "Naive_Bayes":         GaussianNB(),
-}
-
-# Jika hanya satu model yang diminta
-if args.model_name != "all" and args.model_name in models:
-    models = {args.model_name: models[args.model_name]}
+def load_preprocessed_data():
+    """Load preprocessed training and test data"""
+    data_path = "data/preprocessing_objects.pkl"
+    
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Preprocessing data not found at {data_path}")
+    
+    with open(data_path, "rb") as f:
+        data = pickle.load(f)
+    
+    X_train = data["X_train"]
+    X_test = data["X_test"]
+    y_train = data["y_train"]
+    y_test = data["y_test"]
+    feature_names = data.get("feature_names", [])
+    
+    print(f"✓ Data loaded → Train {X_train.shape}, Test {X_test.shape}")
+    
+    return X_train, X_test, y_train, y_test, feature_names
 
 
-# =============== TRAINING & LOGGING ===============
-results = []
-
-# TIDAK ADA start_run() MANUAL → mlflow run . sudah buat run utama
-for name, model in models.items():
-    print(f"\nTraining → {name}")
-
-    # Fit & predict
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    y_prob = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
-
-    # Metrics
-    acc = accuracy_score(y_test, y_pred)
-    pre = precision_score(y_test, y_pred)
-    rec = recall_score(y_test, y_pred)
-    f1  = f1_score(y_test, y_pred)
-    auc = roc_auc_score(y_test, y_prob) if y_prob is not None else None
-
-    # Log metrik (autolog sudah log model + params)
-    mlflow.log_metric("accuracy",  acc)
-    mlflow.log_metric("precision", pre)
-    mlflow.log_metric("recall",    rec)
-    mlflow.log_metric("f1_score",  f1)
-    if auc is not None:
-        mlflow.log_metric("roc_auc", auc)
-
-    results.append({
-        "Model":      name,
-        "Accuracy":  round(acc, 4),
-        "Precision": round(pre, 4),
-        "Recall":    round(rec, 4),
-        "F1-Score":  round(f1, 4),
-        "ROC-AUC":   round(auc, 4) if auc is not None else "N/A"
-    })
-
-    print(f"   Accuracy = {acc:.4f} | F1 = {f1:.4f}" + (f" | AUC = {auc:.4f}" if auc else ""))
+def get_models():
+    """Return dictionary of models to train"""
+    return {
+        "Logistic_Regression": LogisticRegression(
+            random_state=42, 
+            max_iter=1000
+        ),
+        "Decision_Tree": DecisionTreeClassifier(
+            random_state=42
+        ),
+        "Random_Forest": RandomForestClassifier(
+            random_state=42, 
+            n_estimators=200
+        ),
+        "Gradient_Boosting": GradientBoostingClassifier(
+            random_state=42, 
+            n_estimators=200
+        ),
+        "SVM": SVC(
+            random_state=42, 
+            probability=True
+        ),
+        "KNN": KNeighborsClassifier(
+            n_neighbors=5
+        ),
+        "Naive_Bayes": GaussianNB(),
+    }
 
 
-# =============== SIMPAN HASIL & MODEL TERBAIK ===============
-results_df = pd.DataFrame(results).sort_values("Accuracy", ascending=False).reset_index(drop=True)
-print("\nRINGKASAN HASIL")
-print(results_df.to_string(index=False))
+def calculate_metrics(y_test, y_pred, y_prob=None):
+    """Calculate all evaluation metrics"""
+    metrics = {
+        'accuracy': accuracy_score(y_test, y_pred),
+        'precision': precision_score(y_test, y_pred, zero_division=0),
+        'recall': recall_score(y_test, y_pred, zero_division=0),
+        'f1_score': f1_score(y_test, y_pred, zero_division=0),
+    }
+    
+    if y_prob is not None:
+        try:
+            metrics['roc_auc'] = roc_auc_score(y_test, y_prob)
+        except Exception as e:
+            print(f"Warning: Could not calculate ROC AUC - {e}")
+            metrics['roc_auc'] = None
+    else:
+        metrics['roc_auc'] = None
+    
+    return metrics
 
-# Simpan CSV
-results_df.to_csv("csv_output/model_comparison_results.csv", index=False)
-mlflow.log_artifact("csv_output/model_comparison_results.csv")
 
-# Simpan model terbaik
-best_name = results_df.iloc[0]["Model"]
-best_acc  = results_df.iloc[0]["Accuracy"]
-best_model = models[best_name]
-best_model.fit(X_train, y_train)  # retrain sekali lagi
+def train_and_evaluate_model(model_name, model, X_train, X_test, y_train, y_test):
+    """Train a single model and evaluate it"""
+    print(f"\n{'='*60}")
+    print(f"Training → {model_name}")
+    print(f"{'='*60}")
+    
+    # Create nested run for this model
+    with mlflow.start_run(run_name=model_name, nested=True):
+        # Log model parameters
+        if hasattr(model, 'get_params'):
+            params = model.get_params()
+            for key, value in params.items():
+                mlflow.log_param(key, value)
+        
+        # Train model
+        model.fit(X_train, y_train)
+        
+        # Make predictions
+        y_pred = model.predict(X_test)
+        
+        # Get probability predictions if available
+        y_prob = None
+        if hasattr(model, "predict_proba"):
+            y_prob = model.predict_proba(X_test)[:, 1]
+        
+        # Calculate metrics
+        metrics = calculate_metrics(y_test, y_pred, y_prob)
+        
+        # Log metrics to MLflow
+        for metric_name, metric_value in metrics.items():
+            if metric_value is not None:
+                mlflow.log_metric(metric_name, metric_value)
+        
+        # Log model
+        mlflow.sklearn.log_model(
+            model, 
+            "model",
+            input_example=X_train[:5],
+            signature=mlflow.models.infer_signature(X_train, y_pred)
+        )
+        
+        # Print results
+        print(f"✓ Accuracy  = {metrics['accuracy']:.4f}")
+        print(f"✓ Precision = {metrics['precision']:.4f}")
+        print(f"✓ Recall    = {metrics['recall']:.4f}")
+        print(f"✓ F1-Score  = {metrics['f1_score']:.4f}")
+        if metrics['roc_auc'] is not None:
+            print(f"✓ ROC-AUC   = {metrics['roc_auc']:.4f}")
+        
+        # Return results
+        return {
+            "Model": model_name,
+            "Accuracy": round(metrics['accuracy'], 4),
+            "Precision": round(metrics['precision'], 4),
+            "Recall": round(metrics['recall'], 4),
+            "F1-Score": round(metrics['f1_score'], 4),
+            "ROC-AUC": round(metrics['roc_auc'], 4) if metrics['roc_auc'] is not None else "N/A"
+        }
 
-model_path = f"data/best_model_{best_name}.pkl"
-with open(model_path, "wb") as f:
-    pickle.dump(best_model, f)
 
-# Log model terbaik
-mlflow.sklearn.log_model(best_model, artifact_path="best_model")
-mlflow.log_artifact(model_path)
-mlflow.log_metric("best_accuracy", best_acc)
+def save_results_and_best_model(results, models, X_train, y_train):
+    """Save comparison results and best model"""
+    # Create results dataframe
+    results_df = pd.DataFrame(results).sort_values(
+        "Accuracy", 
+        ascending=False
+    ).reset_index(drop=True)
+    
+    print("\n" + "="*60)
+    print("SUMMARY OF RESULTS")
+    print("="*60)
+    print(results_df.to_string(index=False))
+    
+    # Save comparison CSV
+    csv_path = "csv_output/model_comparison_results.csv"
+    results_df.to_csv(csv_path, index=False)
+    mlflow.log_artifact(csv_path)
+    print(f"\n✓ Results saved to {csv_path}")
+    
+    # Get best model
+    best_name = results_df.iloc[0]["Model"]
+    best_acc = results_df.iloc[0]["Accuracy"]
+    best_model = models[best_name]
+    
+    # Retrain best model on full training data
+    print(f"\n{'='*60}")
+    print(f"Retraining best model: {best_name}")
+    print(f"{'='*60}")
+    best_model.fit(X_train, y_train)
+    
+    # Save best model locally
+    model_path = f"data/best_model_{best_name}.pkl"
+    with open(model_path, "wb") as f:
+        pickle.dump(best_model, f)
+    
+    # Log best model to MLflow
+    mlflow.sklearn.log_model(
+        best_model, 
+        "best_model",
+        input_example=X_train[:5]
+    )
+    mlflow.log_artifact(model_path)
+    mlflow.log_param("best_model_name", best_name)
+    mlflow.log_metric("best_accuracy", best_acc)
+    
+    print(f"✓ Best Model: {best_name} (Accuracy = {best_acc})")
+    print(f"✓ Model saved to {model_path}")
+    
+    return best_name, best_acc
 
-print(f"\nModel Terbaik: {best_name} (Accuracy = {best_acc})")
-print(f"Model disimpan → {model_path}")
-print("SELESAI – semua artefak sudah di-log ke MLflow!")
+
+def main():
+    """Main execution function"""
+    # Parse arguments
+    args = parse_arguments()
+    
+    # Setup environment
+    setup_environment()
+    
+    # Load data
+    X_train, X_test, y_train, y_test, feature_names = load_preprocessed_data()
+    
+    # Get models
+    models = get_models()
+    
+    # Filter models if specific model requested
+    if args.model_name != "all" and args.model_name in models:
+        models = {args.model_name: models[args.model_name]}
+        print(f"\n✓ Training only: {args.model_name}")
+    else:
+        print(f"\n✓ Training all models ({len(models)} total)")
+    
+    # Start main MLflow run
+    with mlflow.start_run(run_name="Heart_Disease_Training_Run"):
+        # Log parameters
+        mlflow.log_param("n_models", len(models))
+        mlflow.log_param("train_size", X_train.shape[0])
+        mlflow.log_param("test_size", X_test.shape[0])
+        mlflow.log_param("n_features", X_train.shape[1])
+        
+        # Train all models
+        results = []
+        for name, model in models.items():
+            result = train_and_evaluate_model(
+                name, model, X_train, X_test, y_train, y_test
+            )
+            results.append(result)
+        
+        # Save results and best model
+        best_name, best_acc = save_results_and_best_model(
+            results, models, X_train, y_train
+        )
+    
+    print("\n" + "="*60)
+    print("✓ TRAINING COMPLETE!")
+    print("✓ All artifacts logged to MLflow")
+    print("="*60)
+
+
+if __name__ == "__main__":
+    main()
