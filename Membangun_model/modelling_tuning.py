@@ -229,7 +229,7 @@ for model_name, config in models_tuning.items():
     with mlflow.start_run(run_name=model_name):
         
         # Grid Search
-        print("⏳ Melakukan Grid Search...")
+        print("Melakukan Grid Search...")
         grid_search = GridSearchCV(
             config['model'], 
             config['params'], 
@@ -306,23 +306,23 @@ for model_name, config in models_tuning.items():
         roc_plot_path = create_roc_curve_plot(y_test, y_pred_proba, model_name)
         mlflow.log_artifact(roc_plot_path)
         
-        # 3. Feature Importance Plot (jika ada)
+        # 3. Feature Importance Plot 
         fi_plot_path = create_feature_importance_plot(best_model, feature_names, model_name)
         if fi_plot_path:
             mlflow.log_artifact(fi_plot_path)
         
-        # 4. Precision-Recall Curve (ARTEFAK TAMBAHAN #3)
+        # 4. Precision-Recall Curve 
         pr_plot_path = create_precision_recall_curve_plot(y_test, y_pred_proba, model_name)
         mlflow.log_artifact(pr_plot_path)
         
-        # 5. Classification Report (ARTEFAK TAMBAHAN #4)
+        # 5. Classification Report 
         report = classification_report(y_test, y_pred, output_dict=True)
         report_df = pd.DataFrame(report).transpose()
         report_path = f'csv_output/classification_report_{model_name}.csv'
         report_df.to_csv(report_path)
         mlflow.log_artifact(report_path)
         
-        # 6. Feature Importance CSV (ARTEFAK TAMBAHAN #5)
+        # 6. Feature Importance CSV 
         if hasattr(best_model, 'feature_importances_'):
             fi_df = pd.DataFrame({
                 'feature': feature_names,
@@ -336,7 +336,7 @@ for model_name, config in models_tuning.items():
         mlflow.sklearn.log_model(best_model, "model")
         
         # Tampilkan hasil
-        print(f"\n📊 HASIL EVALUASI:")
+        print(f"\n HASIL EVALUASI:")
         print(f"   Accuracy          : {accuracy:.4f}")
         print(f"   Precision         : {precision:.4f}")
         print(f"   Recall            : {recall:.4f}")
@@ -389,7 +389,7 @@ print("=" * 60)
 best_model_name = results_df.iloc[0]['Model']
 best_accuracy = results_df.iloc[0]['Accuracy']
 
-print(f"\n🏆 Model Terbaik: {best_model_name}")
+print(f"\nModel Terbaik: {best_model_name}")
 print(f"   Accuracy: {best_accuracy:.4f}")
 
 # ==========================================

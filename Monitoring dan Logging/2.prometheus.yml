@@ -5,26 +5,21 @@ global:
     monitor: "heart-disease-monitor"
     environment: "production"
 
-# Alerting configuration
 alerting:
   alertmanagers:
     - static_configs:
         - targets: []
 
-# Load rules once and periodically evaluate them
 rule_files:
   - "rules.yml"
 
-# Scrape configurations
 scrape_configs:
-  # Prometheus self-monitoring
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]
         labels:
           service: "prometheus"
 
-  # Node Exporter - System Metrics
   - job_name: "node-exporter"
     static_configs:
       - targets: ["node-exporter:9100"]
@@ -32,7 +27,6 @@ scrape_configs:
           service: "system"
           instance: "heart-disease-server"
 
-  # Custom ML Model Exporter
   - job_name: "heart-disease-exporter"
     scrape_interval: 10s
     static_configs:
@@ -41,7 +35,6 @@ scrape_configs:
           service: "ml-model"
           model: "heart-disease-classifier"
 
-  # MLServer Metrics (if available)
   - job_name: "mlserver"
     scrape_interval: 15s
     static_configs:

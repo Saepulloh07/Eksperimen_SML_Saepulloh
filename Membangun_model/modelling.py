@@ -32,7 +32,7 @@ mlflow.set_experiment("Heart_Disease_Classification")
 
 print("✓ MLflow Tracking URI: ./mlruns")
 print("✓ Experiment: Heart_Disease_Classification")
-print("\n💡 Untuk melihat dashboard:")
+print("\n Untuk melihat dashboard:")
 print("   mlflow ui --port 5000")
 print("   Buka: http://localhost:5000")
 
@@ -100,7 +100,7 @@ for model_name, model in models.items():
     
     with mlflow.start_run(run_name=model_name, nested=True):
         # Training model
-        print("⏳ Training model...")
+        print(" Training model...")
         model.fit(X_train, y_train)
         print("✓ Training selesai")
         
@@ -128,7 +128,7 @@ for model_name, model in models.items():
             mlflow.log_metric("roc_auc", roc_auc)
         
         # Tampilkan hasil
-        print(f"\n📊 HASIL EVALUASI:")
+        print(f"\n HASIL EVALUASI:")
         print(f"   Accuracy  : {accuracy:.4f}")
         print(f"   Precision : {precision:.4f}")
         print(f"   Recall    : {recall:.4f}")
@@ -179,7 +179,7 @@ print("=" * 60)
 best_model_name = results_df.iloc[0]['Model']
 best_accuracy = results_df.iloc[0]['Accuracy']
 
-print(f"\n🏆 Model Terbaik: {best_model_name}")
+print(f"\n Model Terbaik: {best_model_name}")
 print(f"   Accuracy: {best_accuracy:.4f}")
 
 # ==========================================
@@ -206,7 +206,7 @@ print(f"✓ Model terbaik disimpan: {model_path}")
 print("\n" + "=" * 60)
 print("MODELLING SELESAI!")
 print("=" * 60)
-print("\n📊 Untuk melihat hasil di MLflow Dashboard:")
+print("\n Untuk melihat hasil di MLflow Dashboard:")
 print("   1. Buka terminal/command prompt")
 print("   2. Jalankan: mlflow ui --port 5000")
 print("   3. Buka browser: http://localhost:5000")
