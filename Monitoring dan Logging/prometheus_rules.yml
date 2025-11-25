@@ -1,0 +1,69 @@
+groups:
+  - name: heart_disease_alerts
+    interval: 30s
+    rules:
+      # Alert 1: High Error Rate
+      - alert: HighErrorRate
+        expr: rate(heart_disease_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: model
+        annotations:
+          summary: "High error rate detected in heart disease model"
+          description: "Error rate is {{ $value }} errors/sec for model {{ $labels.model }}"
+
+      # Alert 2: Model Unhealthy
+      - alert: ModelUnhealthy
+        expr: heart_disease_model_health == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: model
+        annotations:
+          summary: "Heart disease model is unhealthy"
+          description: "Model {{ $labels.model }} health check is failing"
+
+      # Alert 3: High Prediction Latency
+      - alert: HighPredictionLatency
+        expr: histogram_quantile(0.95, rate(heart_disease_prediction_latency_seconds_bucket[5m])) > 1.0
+        for: 3m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "High prediction latency detected"
+          description: "95th percentile latency is {{ $value }}s for model {{ $labels.model }}"
+
+      # Alert 4: Low Prediction Rate (model might be stuck)
+      - alert: LowPredictionRate
+        expr: rate(heart_disease_predictions_total[5m]) < 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: model
+        annotations:
+          summary: "Low prediction rate detected"
+          description: "Prediction rate is {{ $value }} predictions/sec, which is unusually low"
+
+      # Alert 5: Data Drift Detected
+      - alert: DataDriftDetected
+        expr: heart_disease_data_drift_score > 0.7
+        for: 10m
+        labels:
+          severity: warning
+          component: data_quality
+        annotations:
+          summary: "Potential data drift detected"
+          description: "Data drift score is {{ $value }}, indicating input data distribution may have changed"
+
+      # Alert 6: High Memory Usage (Fixed - removed humanizeBytes)
+      - alert: HighMemoryUsage
+        expr: heart_disease_memory_usage_bytes{component="model"} > 500000000
+        for: 5m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "High memory usage detected"
+          description: "Model memory usage is {{ $value }} bytes (over 500MB threshold)"
