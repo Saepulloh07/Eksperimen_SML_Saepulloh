@@ -12,7 +12,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'namadataset_raw/**'
+      - 'keuangan_raw/**'
       - 'preprocessing/automate_Saepulloh.py'
       - '.github/workflows/preprocessing.yml'
   workflow_dispatch: {}
@@ -47,14 +47,14 @@ jobs:
       - name: Run automated preprocessing
         run: |
           python preprocessing/automate_Saepulloh.py \
-            --raw_dir namadataset_raw \
-            --output_dir preprocessing/namadataset_preprocessing
+            --raw_dir keuangan_raw \
+            --output_dir preprocessing/keuangan_preprocessing
 
       - name: Commit & push preprocessed dataset (if changed)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add preprocessing/namadataset_preprocessing
+          git add preprocessing/keuangan_preprocessing
           if git diff --cached --quiet; then
             echo "Tidak ada perubahan pada hasil preprocessing."
           else
@@ -66,5 +66,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: preprocessed-dataset
-          path: preprocessing/namadataset_preprocessing/
+          path: preprocessing/keuangan_preprocessing/
           retention-days: 30
