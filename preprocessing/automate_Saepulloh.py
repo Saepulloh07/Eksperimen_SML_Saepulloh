@@ -41,10 +41,10 @@ from sklearn.model_selection import train_test_split
 # =====================================================================
 def load_raw_data(
     raw_dir,
-    laporan_kasir_file="Laporan kasir.xlsx.gpg",
-    closing_file="data sistem 1 - 31 mei.xlsx.gpg",
+    laporan_kasir_file="Laporan kasir.xlsx",
+    closing_file="data sistem 1 - 31 mei.xlsx",
     closing_sheet="PendapatanPerAkunClosing",
-    aruskas_file="ARUS KAS 2026.xlsx.gpg",
+    aruskas_file="ARUS KAS 2026.xlsx",
     aruskas_sheet="Mei",
 ):
     """
@@ -65,10 +65,10 @@ def load_raw_data(
         if not os.path.exists(path):
             raise FileNotFoundError(f"File data mentah tidak ditemukan: {path}")
 
-    df_to = pd.read_excel(laporan_kasir_path, sheet_name="TO", engine="openpyxl")
-    df_tf = pd.read_excel(laporan_kasir_path, sheet_name="TRANSFERAN", engine="openpyxl")
-    df_cl = pd.read_excel(closing_path, sheet_name=closing_sheet, engine="openpyxl")
-    df_ak = pd.read_excel(aruskas_path, sheet_name=aruskas_sheet, engine="openpyxl")
+    df_to = pd.read_excel(laporan_kasir_path, sheet_name="TO")
+    df_tf = pd.read_excel(laporan_kasir_path, sheet_name="TRANSFERAN")
+    df_cl = pd.read_excel(closing_path, sheet_name=closing_sheet)
+    df_ak = pd.read_excel(aruskas_path, sheet_name=aruskas_sheet)
 
     print(f"[load_raw_data] df_to: {df_to.shape}, df_tf: {df_tf.shape}, "
           f"df_cl: {df_cl.shape}, df_ak: {df_ak.shape}")
