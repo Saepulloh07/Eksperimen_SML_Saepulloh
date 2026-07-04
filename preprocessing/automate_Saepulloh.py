@@ -549,10 +549,10 @@ def save_outputs(output_dir, audit_df_final, X_train, X_test, y_train, y_test,
 def preprocess_data(
     raw_dir="namadataset_raw",
     output_dir="namadataset_preprocessing",
-    laporan_kasir_file="Laporan kasir.xlsx",
-    closing_file="data sistem 1 - 31 mei.xlsx",
+    laporan_kasir_file="Laporan kasir.xlsx.gpg",
+    closing_file="data sistem 1 - 31 mei.xlsx.gpg",
     closing_sheet="PendapatanPerAkunClosing",
-    aruskas_file="ARUS KAS 2026.xlsx",
+    aruskas_file="ARUS KAS 2026.xlsx.gpg",
     aruskas_sheet="Mei",
     test_size=0.2,
     random_state=42,
@@ -621,10 +621,10 @@ def _parse_args():
                          help="Folder berisi file Excel data mentah.")
     parser.add_argument("--output_dir", default="preprocessing/keuangan_preprocessing",
                          help="Folder tujuan menyimpan hasil preprocessing.")
-    parser.add_argument("--laporan_kasir_file", default="Laporan kasir.xlsx")
-    parser.add_argument("--closing_file", default="data sistem 1 - 31 mei.xlsx")
+    parser.add_argument("--laporan_kasir_file", default="Laporan kasir.xlsx.gpg")
+    parser.add_argument("--closing_file", default="data sistem 1 - 31 mei.xlsx.gpg")
     parser.add_argument("--closing_sheet", default="PendapatanPerAkunClosing")
-    parser.add_argument("--aruskas_file", default="ARUS KAS 2026.xlsx")
+    parser.add_argument("--aruskas_file", default="ARUS KAS 2026.xlsx.gpg")
     parser.add_argument("--aruskas_sheet", default="Mei")
     parser.add_argument("--test_size", type=float, default=0.2)
     parser.add_argument("--random_state", type=int, default=42)
