@@ -36,21 +36,24 @@ jobs:
         env:
           GPG_PASSPHRASE: ${{ secrets.DATA_PASSPHRASE }}
         run: |
-          # Dekripsi file 1
+          # Hapus '|| echo' agar jika gagal, Actions langsung berhenti dan memberi tahu alasannya
           gpg --quiet --batch --yes --decrypt --passphrase "$GPG_PASSPHRASE" \
-          --output "keuangan_raw/ARUS KAS 2026.xlsx" "keuangan_raw/ARUS KAS 2026.xlsx.gpg" || echo "File ARUS KAS tidak ditemukan"
+          --output "keuangan_raw/ARUS KAS 2026.xlsx" "keuangan_raw/ARUS KAS 2026.xlsx.gpg"
           
-          # Dekripsi file 2
           gpg --quiet --batch --yes --decrypt --passphrase "$GPG_PASSPHRASE" \
-          --output "keuangan_raw/Laporan kasir.xlsx" "keuangan_raw/Laporan kasir.xlsx.gpg" || echo "File Laporan kasir tidak ditemukan"
+          --output "keuangan_raw/Laporan kasir.xlsx" "keuangan_raw/Laporan kasir.xlsx.gpg"
+          
+          gpg --quiet --batch --yes --decrypt --passphrase "$GPG_PASSPHRASE" \
+          --output "keuangan_raw/data sistem 1 - 31 mei.xlsx" "keuangan_raw/data sistem 1 - 31 mei.xlsx.gpg"
 
-          # Dekripsi file 3 (TAMBAHKAN BARIS INI)
-          gpg --quiet --batch --yes --decrypt --passphrase "$GPG_PASSPHRASE" \
-          --output "keuangan_raw/data sistem 1 - 31 mei.xlsx" "keuangan_raw/data sistem 1 - 31 mei.xlsx.gpg" || echo "File data sistem tidak ditemukan"
+      # STEP DEBUGGING BARU: Melihat isi folder aktual di dalam server GitHub
+      - name: Debug Output Folder Keuangan
+        run: |
+          echo "Daftar file di dalam folder keuangan_raw saat ini:"
+          ls -la keuangan_raw/
 
       - name: Run automated preprocessing
         run: |
-          # Pastikan script Anda membaca dari keuangan_raw dan menyimpan ke keuangan_preprocessing
           python preprocessing/automate_Saepulloh.py \
             --raw_dir keuangan_raw \
             --output_dir preprocessing/keuangan_preprocessing
