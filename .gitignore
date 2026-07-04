@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+.DS_Store
+
+# Mengabaikan semua file Excel mentah yang sensitif
+namadataset_raw/*.xlsx
+namadataset_raw/*.xls
+
+# Mengabaikan hasil pemrosesan agar tidak ter-push ke repo publik
+preprocessing/namadataset_preprocessing/*.csv
+preprocessing/namadataset_preprocessing/*.xlsx
