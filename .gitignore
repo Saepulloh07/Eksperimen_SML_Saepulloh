@@ -6,9 +6,9 @@ venv/
 .DS_Store
 
 # Mengabaikan semua file Excel mentah yang sensitif
-namadataset_raw/*.xlsx
-namadataset_raw/*.xls
+keuangan_raw/*.xlsx
+keuangan_raw/*.xls
 
 # Mengabaikan hasil pemrosesan agar tidak ter-push ke repo publik
-preprocessing/namadataset_preprocessing/*.csv
-preprocessing/namadataset_preprocessing/*.xlsx
+preprocessing/keuangan_preprocessing/*.csv
+preprocessing/keuangan_preprocessing/*.xlsx
