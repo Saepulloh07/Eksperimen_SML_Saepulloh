@@ -12,13 +12,13 @@ otomatis (mis. lewat CLI atau GitHub Actions) tanpa perlu Google Colab
 atau Google Drive.
 
 Cara pakai (CLI):
-    python automate_nama-siswa.py \
-        --raw_dir ../namadataset_raw \
-        --output_dir namadataset_preprocessing
+    python automate_Saepulloh.py \
+        --raw_dir keuangan_raw \
+        --output_dir preprocessing/keuangan_preprocessing
 
 Cara pakai (sebagai modul):
-    from automate_nama_siswa import preprocess_data
-    hasil = preprocess_data(raw_dir="namadataset_raw", output_dir="namadataset_preprocessing")
+    from automate_Saepulloh import preprocess_data
+    hasil = preprocess_data(raw_dir="keuangan_raw", output_dir="preprocessing/keuangan_preprocessing")
     X_train, X_test, y_train, y_test = hasil["X_train"], hasil["X_test"], hasil["y_train"], hasil["y_test"]
 """
 
@@ -41,10 +41,10 @@ from sklearn.model_selection import train_test_split
 # =====================================================================
 def load_raw_data(
     raw_dir,
-    laporan_kasir_file="Laporan kasir.xlsx",
-    closing_file="data sistem 1 - 31 mei.xlsx",
+    laporan_kasir_file="Laporan kasir.xlsx.gpg",
+    closing_file="data sistem 1 - 31 mei.xlsx.gpg",
     closing_sheet="PendapatanPerAkunClosing",
-    aruskas_file="ARUS KAS 2026.xlsx",
+    aruskas_file="ARUS KAS 2026.xlsx.gpg",
     aruskas_sheet="Mei",
 ):
     """
@@ -617,9 +617,9 @@ def _parse_args():
     parser = argparse.ArgumentParser(
         description="Preprocessing otomatis data rekonsiliasi keuangan klinik untuk Machine Learning."
     )
-    parser.add_argument("--raw_dir", default="namadataset_raw",
+    parser.add_argument("--raw_dir", default="keuangan_raw",
                          help="Folder berisi file Excel data mentah.")
-    parser.add_argument("--output_dir", default="namadataset_preprocessing",
+    parser.add_argument("--output_dir", default="preprocessing/keuangan_preprocessing",
                          help="Folder tujuan menyimpan hasil preprocessing.")
     parser.add_argument("--laporan_kasir_file", default="Laporan kasir.xlsx")
     parser.add_argument("--closing_file", default="data sistem 1 - 31 mei.xlsx")

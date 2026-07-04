@@ -1,28 +1,16 @@
 name: Automated Data Preprocessing
 
-# ---------------------------------------------------------------------------
-# Workflow ini menjalankan preprocessing.nama-siswa.py secara otomatis setiap
-# kali ada perubahan pada data mentah atau script preprocessing, dan bisa
-# juga dijalankan manual lewat tab "Actions" (workflow_dispatch).
-# Hasil preprocessing terbaru akan otomatis di-commit kembali ke repository
-# di folder preprocessing/namadataset_preprocessing/.
-# ---------------------------------------------------------------------------
-
 on:
   push:
     branches: [ main ]
     paths:
-      - 'keuangan_raw/**'
+      # Terpantik hanya jika ada update pada file data terenkripsi atau script
+      - 'keuangan_raw/*.gpg' 
       - 'preprocessing/automate_Saepulloh.py'
       - '.github/workflows/preprocessing.yml'
   workflow_dispatch: {}
   schedule:
-    # Opsional: jalan otomatis tiap awal bulan jam 00:00 UTC.
-    # Hapus/ubah sesuai kebutuhan.
     - cron: '0 0 1 * *'
-
-permissions:
-  contents: write
 
 jobs:
   preprocess:
@@ -31,8 +19,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -43,28 +29,31 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pandas openpyxl scikit-learn numpy
+
+      # STEP BARU: Dekripsi file sensitif secara lokal di dalam runner
+      - name: Decrypt Sensitive Excel Files
+        env:
+          GPG_PASSPHRASE: ${{ secrets.DATA_PASSPHRASE }}
+        run: |
+          # Asumsi file .gpg sudah di-push ke folder keuangan_raw/
+          gpg --quiet --batch --yes --decrypt --passphrase "$GPG_PASSPHRASE" \
+          --output keuangan_raw/"ARUS KAS 2026.xlsx" keuangan_raw/"ARUS KAS 2026.xlsx.gpg" || echo "File ARUS KAS tidak ditemukan"
+          
+          gpg --quiet --batch --yes --decrypt --passphrase "$GPG_PASSPHRASE" \
+          --output keuangan_raw/"Laporan kasir.xlsx" keuangan_raw/"Laporan kasir.xlsx.gpg" || echo "File Laporan kasir tidak ditemukan"
 
       - name: Run automated preprocessing
         run: |
+          # Pastikan script Anda membaca dari keuangan_raw dan menyimpan ke keuangan_preprocessing
           python preprocessing/automate_Saepulloh.py \
             --raw_dir keuangan_raw \
             --output_dir preprocessing/keuangan_preprocessing
 
-      - name: Commit & push preprocessed dataset (if changed)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add preprocessing/keuangan_preprocessing
-          if git diff --cached --quiet; then
-            echo "Tidak ada perubahan pada hasil preprocessing."
-          else
-            git commit -m "chore: auto-update preprocessed dataset [skip ci]"
-            git push
-          fi
-
+      # STEP DIUBAH: Hapus Git Commit/Push, langsung gunakan Artifact
       - name: Upload preprocessing output as artifact
         uses: actions/upload-artifact@v4
         with:
           name: preprocessed-dataset
           path: preprocessing/keuangan_preprocessing/
-          retention-days: 30
+          retention-days: 7 # Diturunkan ke 7 hari demi keamanan data keuangan
