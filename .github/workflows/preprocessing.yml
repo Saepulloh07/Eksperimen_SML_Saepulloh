@@ -36,12 +36,17 @@ jobs:
         env:
           GPG_PASSPHRASE: ${{ secrets.DATA_PASSPHRASE }}
         run: |
-          # Asumsi file .gpg sudah di-push ke folder keuangan_raw/
+          # Dekripsi file 1
           gpg --quiet --batch --yes --decrypt --passphrase "$GPG_PASSPHRASE" \
-          --output keuangan_raw/"ARUS KAS 2026.xlsx" keuangan_raw/"ARUS KAS 2026.xlsx.gpg" || echo "File ARUS KAS tidak ditemukan"
+          --output "keuangan_raw/ARUS KAS 2026.xlsx" "keuangan_raw/ARUS KAS 2026.xlsx.gpg" || echo "File ARUS KAS tidak ditemukan"
           
+          # Dekripsi file 2
           gpg --quiet --batch --yes --decrypt --passphrase "$GPG_PASSPHRASE" \
-          --output keuangan_raw/"Laporan kasir.xlsx" keuangan_raw/"Laporan kasir.xlsx.gpg" || echo "File Laporan kasir tidak ditemukan"
+          --output "keuangan_raw/Laporan kasir.xlsx" "keuangan_raw/Laporan kasir.xlsx.gpg" || echo "File Laporan kasir tidak ditemukan"
+
+          # Dekripsi file 3 (TAMBAHKAN BARIS INI)
+          gpg --quiet --batch --yes --decrypt --passphrase "$GPG_PASSPHRASE" \
+          --output "keuangan_raw/data sistem 1 - 31 mei.xlsx" "keuangan_raw/data sistem 1 - 31 mei.xlsx.gpg" || echo "File data sistem tidak ditemukan"
 
       - name: Run automated preprocessing
         run: |
