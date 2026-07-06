@@ -36,9 +36,8 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 
 
-# =====================================================================
+
 # 1. LOAD RAW DATA
-# =====================================================================
 def load_raw_data(
     raw_dir,
     laporan_kasir_file="Laporan kasir.xlsx",
@@ -76,9 +75,7 @@ def load_raw_data(
     return df_to, df_tf, df_cl, df_ak
 
 
-# =====================================================================
 # 2. PEMBERSIHAN PER SUMBER DATA (identik dengan notebook eksperimen)
-# =====================================================================
 def clean_df_to(df_to):
     """Membersihkan data 'TO' (kasir tunai)."""
     df_to = df_to.iloc[1:].reset_index(drop=True)
@@ -234,9 +231,7 @@ def clean_df_ak(df_ak):
     return hasil
 
 
-# =====================================================================
 # 3. FUZZY NAME MATCHING
-# =====================================================================
 def cek_kemiripan_nama(n1, n2):
     """
     Mendeteksi apakah 2 nama merujuk ke orang yang sama.
@@ -263,9 +258,7 @@ def cek_kemiripan_nama(n1, n2):
     return False
 
 
-# =====================================================================
 # 4. BANGUN audit_df: REKONSILIASI + PELABELAN MULTI-KELAS
-# =====================================================================
 def build_audit_dataframe(df_to, df_tf, df_cl, df_ak):
     """
     Menggabungkan 4 sumber data (kasir/TO, transfer/TF, closing/CL, arus
@@ -407,9 +400,7 @@ def build_audit_dataframe(df_to, df_tf, df_cl, df_ak):
     return audit_df, unik_labels
 
 
-# =====================================================================
 # 5. FINALISASI PREPROCESSING UNTUK MODELING
-# =====================================================================
 def handle_missing_and_duplicates(audit_df):
     """Penanganan missing value & data duplikat (final)."""
     audit_df = audit_df.copy()
@@ -517,9 +508,7 @@ def split_dataset(audit_df, kolom_scaled, test_size=0.2, random_state=42):
     return X_train, X_test, y_train, y_test, fitur_model
 
 
-# =====================================================================
 # 6. SIMPAN OUTPUT
-# =====================================================================
 def save_outputs(output_dir, audit_df_final, X_train, X_test, y_train, y_test,
                   scaler, encoders, label_mapping):
     os.makedirs(output_dir, exist_ok=True)
@@ -543,9 +532,7 @@ def save_outputs(output_dir, audit_df_final, X_train, X_test, y_train, y_test,
         print("  -", fname)
 
 
-# =====================================================================
 # 7. ORKESTRATOR UTAMA
-# =====================================================================
 def preprocess_data(
     raw_dir="namadataset_raw",
     output_dir="namadataset_preprocessing",
@@ -610,9 +597,7 @@ def preprocess_data(
     }
 
 
-# =====================================================================
 # 8. ENTRY POINT CLI
-# =====================================================================
 def _parse_args():
     parser = argparse.ArgumentParser(
         description="Preprocessing otomatis data rekonsiliasi keuangan klinik untuk Machine Learning."
