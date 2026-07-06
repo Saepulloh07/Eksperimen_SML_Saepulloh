@@ -15,3 +15,5 @@ preprocessing/keuangan_preprocessing/*.xlsx
 
 preprosessing_output/audit_df_preprocessed.csv
 .audit_df_preprocessed.csv
+
+Membangun_model/preprosessing_output/audit_df_preprocessed.csv
