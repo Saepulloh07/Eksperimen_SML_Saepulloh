@@ -12,3 +12,6 @@ keuangan_raw/*.xls
 # Mengabaikan hasil pemrosesan agar tidak ter-push ke repo publik
 preprocessing/keuangan_preprocessing/*.csv
 preprocessing/keuangan_preprocessing/*.xlsx
+
+preprosessing_output/audit_df_preprocessed.csv
+.audit_df_preprocessed.csv
